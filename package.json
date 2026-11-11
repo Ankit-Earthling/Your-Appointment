@@ -1,0 +1,41 @@
+{
+  "name": "your-appointment",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "npm@11.20.0",
+  "engines": {
+    "node": ">=26.13.0 <27",
+    "npm": ">=11.20.0 <12"
+  },
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "setup": "npm install",
+    "dev": "concurrently -n frontend,backend -c cyan,green \"npm:dev:frontend\" \"npm:dev:backend\"",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:backend": "npm run dev --workspace backend",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint frontend backend --ext .js,.jsx",
+    "build": "npm run build --workspace frontend && npm run build --workspace backend",
+    "format": "prettier --write \"frontend/**/*.{js,jsx,css,html,json}\" \"backend/**/*.js\" \"*.json\" \"*.js\" \".github/**/*.yml\" README.md",
+    "format:check": "prettier --check \"frontend/**/*.{js,jsx,css,html,json}\" \"backend/**/*.js\" \"*.json\" \"*.js\" \".github/**/*.yml\" README.md"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "concurrently": "10.0.7",
+    "eslint": "10.14.0",
+    "globals": "17.14.0",
+    "prettier": "3.10.0"
+  },
+  "overrides": {
+    "eslint": {
+      "minimatch": "11.0.7"
+    }
+  },
+  "allowScripts": {
+    "bcrypt@6.0.0": true
+  }
+}

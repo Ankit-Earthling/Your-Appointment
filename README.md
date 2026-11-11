@@ -1,55 +1,121 @@
 # Your Appointment
 
-Your Appointment is a configurable, multi-tenant appointment and live queue MVP.
+Your Appointment is a local-first, multi-tenant appointment booking and live queue application. This repository is intended to run on a developer’s Windows machine; deployment and hosting are outside the current scope.
 
-## Technology
+## Prerequisites
 
-- React, Vite, Tailwind CSS, React Router, Socket.IO client.
-- Node.js, Express modular monolith, MongoDB/Mongoose, Zod.
-- JWT cookie sessions, bcrypt password hashes, Socket.IO.
-- npm workspaces, ESLint 10, Prettier, Vitest and GitHub Actions.
+- Windows 11 and PowerShell.
+- Node.js `26.13.0` (or another Node 26 release meeting `>=26.13.0 <27`) and npm `11` (`>=11.20.0 <12`).
+- MongoDB installed locally and available at `mongodb://127.0.0.1:27017`.
 
-Runtime and tool versions are pinned in the workspace manifests and `package-lock.json` (including ESLint `10.14.0` and `@eslint/js` `10.0.1`). Node.js 26 and npm 11 are required.
+## Windows 11 local setup
 
-## Start locally
+Run these steps from the repository root in PowerShell.
 
-Install MongoDB and ensure it is running before starting the backend. Initial database connection failure prevents the API from listening.
+### 1. Install dependencies
 
 ```powershell
-npm install
-Copy-Item backend/.env.example backend/.env
+npm ci
 ```
 
-Replace `JWT_SECRET` with a random secret of at least 32 characters. Keep `.env` private. Then run both apps:
+### 2. Start or verify MongoDB
 
-```sh
+This project’s default connection uses the local MongoDB service on port `27017`.
+
+```powershell
+Get-Service MongoDB
+```
+
+If the service is stopped, start it from an elevated PowerShell window:
+
+```powershell
+Start-Service MongoDB
+```
+
+Confirm that MongoDB accepts a local connection:
+
+```powershell
+Test-NetConnection 127.0.0.1 -Port 27017
+```
+
+Continue when `TcpTestSucceeded` is `True`. The backend fails startup if its initial MongoDB connection cannot be established.
+
+### 3. Configure backend environment variables
+
+Create the local environment file and open it:
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+notepad backend/.env
+```
+
+The example defines the actual backend variables `NODE_ENV`, `PORT`, `FRONTEND_ORIGIN`, `MONGODB_URI`, and `JWT_SECRET`. Its defaults use development mode, port `4000`, frontend origin `http://localhost:5173`, and database `your_appointment_dev` on the local MongoDB service. Keep those values for the default local setup. Replace the placeholder `JWT_SECRET` with a random secret of at least 32 characters. You can generate one with:
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+```
+
+Paste the generated value after `JWT_SECRET=` in `backend/.env` and save the file. Never commit `.env` or share its contents.
+
+### 4. Seed demo data safely
+
+The seed command creates or updates a demo owner, staff account, business, branch, service, staff assignment and queue QR credential. It refuses to run when `NODE_ENV=production`. Set the four variables that the seed actually reads; use emails and passwords you choose. Passwords must each be at least 12 characters. PowerShell’s secure prompt avoids echoing the passwords:
+
+```powershell
+$env:DEMO_OWNER_EMAIL = Read-Host 'Demo owner email'
+$ownerPassword = Read-Host 'Demo owner password (12+ characters)' -AsSecureString
+$env:DEMO_OWNER_PASSWORD = [System.Net.NetworkCredential]::new('', $ownerPassword).Password
+$env:DEMO_STAFF_EMAIL = Read-Host 'Demo staff email'
+$staffPassword = Read-Host 'Demo staff password (12+ characters)' -AsSecureString
+$env:DEMO_STAFF_PASSWORD = [System.Net.NetworkCredential]::new('', $staffPassword).Password
+npm run seed --workspace backend
+Remove-Item Env:DEMO_OWNER_EMAIL, Env:DEMO_OWNER_PASSWORD, Env:DEMO_STAFF_EMAIL, Env:DEMO_STAFF_PASSWORD
+```
+
+The seed prints the owner/staff email addresses, business/branch/service IDs and a one-time local queue QR URL. Use the passwords you entered when signing in; the seed does not print them. Run the seed again only when you want to refresh the demo setup: it rotates and revokes the previous QR credential.
+
+### 5. Start the frontend and backend
+
+From the repository root:
+
+```powershell
 npm run dev
 ```
 
-Frontend: `http://localhost:5173`; API: `http://localhost:4000`; health: `http://localhost:4000/health`.
+This starts both development servers. Alternatively, run `npm run dev:backend` and `npm run dev:frontend` in separate PowerShell windows. Keep MongoDB running. Press `Ctrl+C` in the server window(s) to stop development servers.
 
-## MVP walkthrough
+### 6. Open the local application
 
-1. Register and sign in, then create a business.
-2. Create a branch with an IANA timezone (for example `Asia/Kolkata`) and a service. The initial setup form enables appointment, queue, guest booking, and account features.
-3. Register a second user and assign that existing account as staff. The branch ID is returned by the creation API (it is currently a manual setup step in the small demo UI).
-4. Share `/book/<businessId>` for appointment booking. Booking availability is scoped to the branch timezone and staff schedule; overlapping appointments are claimed atomically.
-5. Rotate the branch queue QR from the owner workspace. Scan its URL to choose a service and join the queue. Ticket status updates arrive over an access-token-authorized Socket.IO room.
+- Frontend: <http://localhost:5173>
+- Backend API: <http://localhost:4000/api/v1>
+- Backend health check: <http://localhost:4000/health>
 
-The API is rooted at `/api/v1`. Tenant IDs are always derived from authenticated business membership or the server-resolved public resource. Customer accounts do not require a business membership. Public tokens are random credentials; only SHA-256 hashes are stored. A one-hour JWT is held in an HTTP-only cookie. Queue sequences reset by branch-local date.
+The health response should include `"database":"connected"`.
 
-For repeatable local demonstration data, set `DEMO_OWNER_EMAIL`, `DEMO_OWNER_PASSWORD`, `DEMO_STAFF_EMAIL`, and `DEMO_STAFF_PASSWORD` in the process environment (both passwords must be at least 12 characters), then run `npm run seed --workspace backend`. The seed refuses to run when `NODE_ENV=production`, creates demo users/business/branch/service/staff assignment, rotates a branch QR credential, and prints the one-time QR URL and record IDs. Use throwaway local credentials; none are stored in the repository.
+### 7. Log in with the seeded demo owner
 
-## Quality commands
+Open <http://localhost:5173/auth>, choose **Sign in**, and enter the owner email and password you supplied in Step 4. The demo business already exists. Its business ID from the seed output is used in the customer booking URL below. The seeded staff member can sign in at the same page using the staff email and password you supplied.
 
-```sh
+### 8. Walk through owner, customer and staff workflows
+
+1. **Owner:** open the owner workspace. Review appointments and operational counts. The seed has already created the demo branch and service. The queue QR URL printed by the seed opens the public queue entry page.
+2. **Customer appointment:** open `http://localhost:5173/book/<business-id>` using the business ID printed in Step 4. Choose the demo branch, service and available time, then book as a guest with a name and email.
+3. **Owner appointment management:** return to the owner workspace to view the appointment. Use **Complete** or **Cancel** to update it.
+4. **Guest queue entry:** open the printed QR URL (or scan its QR code) and join the demo service queue. Keep the ticket page open to receive live status changes.
+5. **Staff queue operations:** sign out, sign in with the seeded staff account, and use the operations panel to **Call next**, **Start service**, and **Complete**. The guest ticket page updates through Socket.IO.
+
+## Quality checks
+
+```powershell
 npm test
 npm run lint
 npm run build
-npm run format:check
+npm run format
 npm audit
 ```
 
-## MVP limits
+`npm run format` formats source/configuration and this README; it does not rewrite the approved design documents under `docs/`.
 
-No notifications are delivered; password recovery and account verification are absent. Platform administration and advanced support access are deferred. Booking links require a known business ID; there is no general public business directory. Refresh-token rotation, persistent/shared rate limiting, deployment topology, and numerical performance targets remain unresolved. See [MVP implementation decisions](docs/mvp-decisions.md).
+## Local application scope and limitations
+
+Authentication uses an HTTP-only JWT cookie. Guest booking/queue credentials are returned when created; only their hashes are stored. Appointment capacity is staff-specific and claimed atomically. Queue numbering resets by branch-local date. The current MVP does not deliver notifications, provide password recovery, implement refresh-token rotation, or include platform-administrator screens. Rate limits are process-local. Booking links need a business ID; there is no general public business directory. See [MVP implementation decisions](docs/mvp-decisions.md).

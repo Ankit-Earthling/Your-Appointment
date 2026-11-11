@@ -513,6 +513,11 @@ router.post(
       status: 'CALLED',
       sequenceNumber: ticket.sequenceNumber,
     });
+    ioRef()?.to(`queue-ticket:${ticket._id}`).emit('ticket.updated', {
+      ticketId: ticket._id,
+      status: 'CALLED',
+      sequenceNumber: ticket.sequenceNumber,
+    });
     res.json({
       data: { id: ticket._id, sequenceNumber: ticket.sequenceNumber, status: ticket.status },
     });

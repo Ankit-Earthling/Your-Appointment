@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isIanaTimezone, localDate, scheduleAllows } from './time.js';
+import { isIanaTimezone, localDate, localTimeToUtc, scheduleAllows } from './time.js';
 import { hashToken } from './security.js';
 
 describe('branch-local schedule helpers', () => {
@@ -7,6 +7,13 @@ describe('branch-local schedule helpers', () => {
     expect(isIanaTimezone('Asia/Kolkata')).toBe(true);
     expect(isIanaTimezone('Not/A_Timezone')).toBe(false);
     expect(localDate(new Date('2026-11-12T20:00:00Z'), 'Asia/Kolkata')).toBe('2026-11-13');
+  });
+
+  it('converts local schedule times to UTC and rejects nonexistent DST wall times', () => {
+    expect(localTimeToUtc('2026-11-13', 9 * 60, 'Asia/Kolkata')?.toISOString()).toBe(
+      '2026-11-13T03:30:00.000Z',
+    );
+    expect(localTimeToUtc('2026-03-08', 2 * 60 + 30, 'America/New_York')).toBeUndefined();
   });
 
   it('accepts a variable-duration interval only when it fits within local opening hours', () => {

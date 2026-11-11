@@ -14,7 +14,7 @@ import {
 } from '../models/index.js';
 import { AppError, asyncRoute } from '../lib/errors.js';
 import { issuePublicToken, verifyPublicToken } from '../lib/public-tokens.js';
-import { localDate, parseInstant, scheduleAllows } from '../lib/time.js';
+import { localDate, localTimeToUtc, parseInstant, scheduleAllows } from '../lib/time.js';
 import {
   authenticate,
   maybeAuthenticate,
@@ -110,19 +110,8 @@ router.get(
     const now = Date.now();
     for (const staff of assignments)
       for (let minute = 0; minute < 1440; minute += 15) {
-        const local = new Date(`${date}T00:00:00Z`);
-        local.setUTCMinutes(minute);
-        const offset =
-          new Intl.DateTimeFormat('en-US', {
-            timeZone: branch.timezone,
-            timeZoneName: 'longOffset',
-          })
-            .formatToParts(local)
-            .find((x) => x.type === 'timeZoneName')
-            ?.value?.replace('GMT', '') || '+00:00';
-        const start = new Date(
-          `${date}T${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00${offset}`,
-        );
+        const start = localTimeToUtc(date, minute, branch.timezone);
+        if (!start) continue;
         const end = new Date(start.getTime() + service.durationMinutes * 60000);
         if (
           start.getTime() <= now ||

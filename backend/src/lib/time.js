@@ -42,6 +42,27 @@ export function localDate(instant, timezone) {
   return localParts(instant, timezone).date;
 }
 
+export function localTimeToUtc(date, minutes, timezone) {
+  const [year, month, day] = date.split('-').map(Number);
+  const desired = Date.UTC(year, month - 1, day, Math.floor(minutes / 60), minutes % 60);
+  let candidate = new Date(desired);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const actual = localParts(candidate, timezone);
+    const [actualYear, actualMonth, actualDay] = actual.date.split('-').map(Number);
+    const actualWallTime = Date.UTC(
+      actualYear,
+      actualMonth - 1,
+      actualDay,
+      Math.floor(actual.minutes / 60),
+      actual.minutes % 60,
+    );
+    const difference = desired - actualWallTime;
+    if (difference === 0) return candidate;
+    candidate = new Date(candidate.getTime() + difference);
+  }
+  return undefined;
+}
+
 export function scheduleAllows(hours, timezone, startAt, endAt) {
   const start = localParts(startAt, timezone);
   const end = localParts(new Date(endAt.getTime() - 1), timezone);

@@ -202,38 +202,102 @@ router.post(
   authenticate,
   validate(businessCreateSchema),
   asyncRoute(async (request, response) => {
-    const _id = new mongoose.Types.ObjectId();
-    const business = await Business.create({
-      _id,
-      tenantId: _id,
-      name: request.body.name,
-      businessType: request.body.businessType ?? '',
-    });
-
-    try {
-      const membership = await Membership.create({
-        tenantId: _id,
+    const creationKey = request.get('Idempotency-Key');
+    if (creationKey && !/^[a-f\d-]{36}$/i.test(creationKey)) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Idempotency-Key must be a UUID.');
+    }
+    async function finishCreation(business, statusCode) {
+      let membership = await Membership.findOne({
+        tenantId: business._id,
         userId: request.user._id,
-        roles: ['owner'],
       });
-      await recordAudit({
-        tenantId: _id,
-        actorUserId: request.user._id,
-        action: 'business.created',
-        resourceType: 'business',
-        resourceId: _id,
-        summary: 'Business and owner membership created.',
-      });
-      response.status(201).json({
+      let createdMembership = false;
+      if (membership?.status === 'inactive') {
+        throw new AppError(409, 'MEMBERSHIP_INACTIVE', 'The owner membership is inactive.');
+      }
+      if (!membership) {
+        try {
+          membership = await Membership.create({
+            tenantId: business._id,
+            userId: request.user._id,
+            roles: ['owner'],
+            ...(creationKey ? { creationKey } : {}),
+          });
+          createdMembership = true;
+        } catch (error) {
+          if (error.code !== 11000) throw error;
+          membership = await Membership.findOne({
+            tenantId: business._id,
+            userId: request.user._id,
+            status: 'active',
+          });
+          if (!membership) throw error;
+        }
+      }
+      if (createdMembership) {
+        await recordAudit({
+          tenantId: business._id,
+          actorUserId: request.user._id,
+          action: 'business.created',
+          resourceType: 'business',
+          resourceId: business._id,
+          summary: 'Business and owner membership created.',
+        });
+      }
+      response.status(statusCode).json({
         data: {
           business: businessDto(business),
           membership: { id: membership._id, roles: membership.roles },
         },
       });
+    }
+    if (creationKey) {
+      const priorMembership = await Membership.findOne({
+        userId: request.user._id,
+        creationKey,
+        status: 'active',
+      }).select('+creationKey');
+      if (priorMembership) {
+        const priorBusiness = await Business.findById(priorMembership.tenantId);
+        if (priorBusiness) {
+          await finishCreation(priorBusiness, 200);
+          return;
+        }
+      }
+      const priorBusiness = await Business.findOne({
+        createdByUserId: request.user._id,
+        creationKey,
+      }).select('+creationKey');
+      if (priorBusiness) {
+        await finishCreation(priorBusiness, 200);
+        return;
+      }
+    }
+
+    const _id = new mongoose.Types.ObjectId();
+    let business;
+    try {
+      business = await Business.create({
+        _id,
+        tenantId: _id,
+        name: request.body.name,
+        businessType: request.body.businessType ?? '',
+        ...(creationKey ? { createdByUserId: request.user._id, creationKey } : {}),
+      });
     } catch (error) {
-      await Business.deleteOne({ _id });
+      if (creationKey && error.code === 11000) {
+        const priorBusiness = await Business.findOne({
+          createdByUserId: request.user._id,
+          creationKey,
+        }).select('+creationKey');
+        if (priorBusiness) {
+          await finishCreation(priorBusiness, 200);
+          return;
+        }
+      }
       throw error;
     }
+    await finishCreation(business, 201);
   }),
 );
 
@@ -449,7 +513,16 @@ router.get(
   validateObjectIds('businessId'),
   resolveMembership,
   asyncRoute(async (request, response) => {
-    const branches = await Branch.find({ tenantId: request.tenantId }).sort({ createdAt: 1 });
+    const branchFilter = { tenantId: request.tenantId };
+    if (request.membership.roles.includes('staff') && !request.membership.roles.includes('owner')) {
+      const assignments = await StaffAssignment.find({
+        tenantId: request.tenantId,
+        membershipId: request.membership._id,
+        status: 'active',
+      }).select('branchId');
+      branchFilter._id = { $in: assignments.map((assignment) => assignment.branchId) };
+    }
+    const branches = await Branch.find(branchFilter).sort({ createdAt: 1 });
     response.json({ data: branches.map(branchDto) });
   }),
 );
@@ -541,7 +614,21 @@ router.get(
   validateObjectIds('businessId'),
   resolveMembership,
   asyncRoute(async (request, response) => {
-    const services = await Service.find({ tenantId: request.tenantId }).sort({ name: 1 });
+    const serviceFilter = { tenantId: request.tenantId };
+    if (request.membership.roles.includes('staff') && !request.membership.roles.includes('owner')) {
+      const assignments = await StaffAssignment.find({
+        tenantId: request.tenantId,
+        membershipId: request.membership._id,
+        status: 'active',
+      }).select('branchId serviceIds');
+      if (!assignments.some((assignment) => assignment.serviceIds.length === 0)) {
+        serviceFilter._id = {
+          $in: [...new Set(assignments.flatMap((assignment) => assignment.serviceIds.map(String)))],
+        };
+      }
+      serviceFilter.branchIds = { $in: assignments.map((assignment) => assignment.branchId) };
+    }
+    const services = await Service.find(serviceFilter).sort({ name: 1 });
     response.json({ data: services.map(serviceDto) });
   }),
 );

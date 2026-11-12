@@ -94,15 +94,29 @@ The health response should include `"database":"connected"`.
 
 ### 7. Log in with the seeded demo owner
 
-Open <http://localhost:5173/auth>, choose **Sign in**, and enter the owner email and password you supplied in Step 4. The demo business already exists. Its business ID from the seed output is used in the customer booking URL below. The seeded staff member can sign in at the same page using the staff email and password you supplied.
+Open <http://localhost:5173/auth?intent=owner>, choose **Sign in**, and enter the owner email and password you supplied in Step 4. The demo business already exists. Its business ID from the seed output is used in the customer booking URL below. The seeded staff member can sign in at <http://localhost:5173/auth?intent=staff> using the staff email and password you supplied.
 
-### 8. Walk through owner, customer and staff workflows
+### 8. Owner, staff and customer journeys
 
-1. **Owner:** open the owner workspace. Review appointments and operational counts. The seed has already created the demo branch and service. The queue QR URL printed by the seed opens the public queue entry page.
-2. **Customer appointment:** open `http://localhost:5173/book/<business-id>` using the business ID printed in Step 4. Choose the demo branch, service and available time, then book as a guest with a name and email.
-3. **Owner appointment management:** return to the owner workspace to view the appointment. Use **Complete** or **Cancel** to update it.
-4. **Guest queue entry:** open the printed QR URL (or scan its QR code) and join the demo service queue. Keep the ticket page open to receive live status changes.
-5. **Staff queue operations:** sign out, sign in with the seeded staff account, and use the operations panel to **Call next**, **Start service**, and **Complete**. The guest ticket page updates through Socket.IO.
+Use the business, branch, service IDs, account emails and queue entry URL printed by the seed command. The seed creates demo data only; it does not choose passwords for you.
+
+#### Business owner
+
+1. Open <http://localhost:5173/auth?intent=owner> and register with a new email, or sign in with the seeded owner credentials.
+2. A new owner sees the setup flow: create a business, add its first branch, add a service, optionally assign a staff account, then finish setup. The seeded owner can open the existing business workspace directly.
+3. Use the owner navigation for appointments, queue operations, customers, staff, services, branches, analytics and business settings. Use the generated branch QR entry link for walk-ins and the booking link `http://localhost:5173/book/<business-id>` for appointments.
+
+#### Staff member
+
+1. Register or sign in at <http://localhost:5173/auth?intent=staff> with the staff email/password supplied during seeding.
+2. The owner must assign the staff account to a branch from **Staff** settings. After assignment, sign in again if the pending-access screen was already open.
+3. The staff workspace shows assigned operational work: appointments, queue, customer details and schedule. Staff API access is scoped to assigned branches.
+
+#### Customer
+
+1. Open `http://localhost:5173/book/<business-id>` to choose an active branch, service and available time. A guest can enter a name and email and confirm without registering.
+2. For an account, open <http://localhost:5173/auth?intent=customer>, register or sign in, then use **My Appointments** and **Queue Tracking**. Customer accounts are not required for guest bookings.
+3. For a walk-in, open the queue entry URL printed by the seed (or scan the branch QR code), choose a service and enter guest details. Keep the ticket page open to receive live status and queue-position updates while staff call, serve and complete the ticket.
 
 ## Quality checks
 

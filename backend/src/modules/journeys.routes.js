@@ -25,6 +25,7 @@ import {
 import { publicFlowLimiter } from '../lib/rate-limits.js';
 import { validate, validateObjectIds } from '../lib/validation.js';
 import { ioRef } from '../lib/socket.js';
+import { recordAudit } from '../lib/audit.js';
 
 const router = Router();
 const id = z.string().regex(/^[a-f\d]{24}$/i);
@@ -299,6 +300,129 @@ router.get(
       .limit(200)
       .select('-customerUserId -customerProfileId');
     res.json({ data: appointments });
+  }),
+);
+
+router.get(
+  '/me/appointments',
+  authenticate,
+  asyncRoute(async (req, res) => {
+    const appointments = await Appointment.find({ customerUserId: req.user._id })
+      .sort({ startAt: -1 })
+      .limit(100)
+      .select('branchId serviceId startAt endAt timezone status statusHistory createdAt')
+      .populate('branchId', 'name timezone')
+      .populate('serviceId', 'name durationMinutes');
+    res.json({ data: appointments });
+  }),
+);
+
+router.patch(
+  '/me/appointments/:appointmentId',
+  authenticate,
+  validateObjectIds('appointmentId'),
+  asyncRoute(async (req, res) => {
+    const appointment = await Appointment.findOne({
+      _id: req.params.appointmentId,
+      customerUserId: req.user._id,
+    });
+    if (!appointment) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Appointment was not found.');
+    if (appointment.status !== 'BOOKED')
+      throw new AppError(409, 'INVALID_TRANSITION', 'Only booked appointments may be cancelled.');
+    appointment.status = 'CANCELLED';
+    appointment.statusHistory.push({
+      status: 'CANCELLED',
+      at: new Date(),
+      actorUserId: req.user._id,
+    });
+    await appointment.save();
+    await ReservationCalendar.updateOne(
+      {
+        tenantId: appointment.tenantId,
+        staffAssignmentId: appointment.staffAssignmentId,
+        localDate: appointment.localDate,
+      },
+      { $pull: { reservations: { appointmentId: appointment._id } } },
+    );
+    await recordAudit({
+      tenantId: appointment.tenantId,
+      actorUserId: req.user._id,
+      action: 'appointment.customer_cancelled',
+      resourceType: 'appointment',
+      resourceId: appointment._id,
+      summary: 'Customer cancelled their appointment.',
+    });
+    res.json({ data: { id: appointment._id, status: appointment.status } });
+  }),
+);
+
+router.get(
+  '/me/queue-tickets',
+  authenticate,
+  asyncRoute(async (req, res) => {
+    const tickets = await QueueTicket.find({ customerUserId: req.user._id })
+      .sort({ joinedAt: -1 })
+      .limit(100)
+      .select('branchId serviceId queueConfigurationId sequenceNumber status localDate joinedAt')
+      .populate('branchId', 'name timezone')
+      .populate('serviceId', 'name');
+    res.json({ data: tickets });
+  }),
+);
+
+router.get(
+  '/businesses/:businessId/customers',
+  authenticate,
+  validateObjectIds('businessId'),
+  resolveMembership,
+  requireRole('owner', 'staff'),
+  asyncRoute(async (req, res) => {
+    let branchIds;
+    if (req.membership.roles.includes('staff') && !req.membership.roles.includes('owner')) {
+      const assignments = await StaffAssignment.find({
+        tenantId: req.tenantId,
+        membershipId: req.membership._id,
+        status: 'active',
+      }).select('branchId');
+      branchIds = assignments.map((assignment) => assignment.branchId);
+    }
+    const activityFilter = { tenantId: req.tenantId };
+    if (branchIds) activityFilter.branchId = { $in: branchIds };
+    const [appointments, tickets] = await Promise.all([
+      Appointment.find(activityFilter)
+        .sort({ startAt: -1 })
+        .limit(500)
+        .select('customerProfileId branchId startAt status serviceId'),
+      QueueTicket.find(activityFilter)
+        .sort({ joinedAt: -1 })
+        .limit(500)
+        .select('customerProfileId branchId joinedAt status serviceId'),
+    ]);
+    const profileIds = [
+      ...new Set([...appointments, ...tickets].map((item) => String(item.customerProfileId))),
+    ];
+    const profiles = await CustomerProfile.find({
+      tenantId: req.tenantId,
+      _id: { $in: profileIds },
+    }).select('displayName email phone');
+    const latestActivity = new Map();
+    for (const item of [...appointments, ...tickets]) {
+      const key = String(item.customerProfileId);
+      const timestamp = item.startAt ?? item.joinedAt;
+      const current = latestActivity.get(key) ?? { count: 0, lastAt: null };
+      current.count += 1;
+      if (!current.lastAt || timestamp > current.lastAt) current.lastAt = timestamp;
+      latestActivity.set(key, current);
+    }
+    res.json({
+      data: profiles.map((profile) => ({
+        id: profile._id,
+        displayName: profile.displayName,
+        email: profile.email,
+        phone: profile.phone,
+        ...latestActivity.get(String(profile._id)),
+      })),
+    });
   }),
 );
 router.patch(

@@ -10,8 +10,7 @@
     'Segoe UI',
     sans-serif;
   color: #0f172a;
-  background:
-    radial-gradient(ellipse at top left, rgb(224 231 255 / 70%), transparent 48%), #f6f8fc;
+  background: #f7f8fc;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -33,20 +32,6 @@ button {
   cursor: pointer;
 }
 
-input,
-select {
-  width: 100%;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.6rem;
-  padding: 0.75rem;
-  background: white;
-}
-button:not(nav button) {
-  border-radius: 0.6rem;
-  background: #3730a3;
-  color: white;
-  padding: 0.7rem 1rem;
-}
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -57,4 +42,153 @@ button:disabled {
   background: #fff;
   padding: 1.5rem;
   box-shadow: 0 10px 28px rgb(15 23 42 / 5%);
+}
+
+.surface {
+  border: 1px solid #e2e8f0;
+  border-radius: 1.25rem;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(15 23 42 / 5%);
+}
+
+.field-label {
+  display: grid;
+  gap: 0.45rem;
+  color: #334155;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.field-control {
+  width: 100%;
+  min-height: 2.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.8rem;
+  background: white;
+  color: #0f172a;
+  font: inherit;
+}
+.field-control:focus {
+  outline: 3px solid rgb(99 102 241 / 20%);
+  border-color: #6366f1;
+}
+.button-primary,
+.button-secondary,
+.button-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.65rem;
+  border: 1px solid transparent;
+  border-radius: 0.7rem;
+  padding: 0.65rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
+}
+.button-primary {
+  background: #3730a3;
+  color: white;
+}
+.button-primary:hover {
+  background: #312e81;
+}
+.button-secondary {
+  border-color: #cbd5e1;
+  background: white;
+  color: #334155;
+}
+.button-secondary:hover {
+  border-color: #a5b4fc;
+  background: #eef2ff;
+}
+.button-danger {
+  background: #be123c;
+  color: white;
+}
+.button-danger:hover {
+  background: #9f1239;
+}
+.button-primary:focus-visible,
+.button-secondary:focus-visible,
+.button-danger:focus-visible,
+.nav-link:focus-visible {
+  outline: 3px solid #a5b4fc;
+  outline-offset: 2px;
+}
+.nav-link {
+  display: flex;
+  align-items: center;
+  border-radius: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  color: #475569;
+  font-size: 0.9rem;
+  font-weight: 550;
+  text-decoration: none;
+}
+.nav-link:hover {
+  background: #f1f5f9;
+  color: #1e1b4b;
+}
+.nav-link-active {
+  background: #eef2ff;
+  color: #3730a3;
+}
+.toggle-on {
+  background: #eef2ff;
+  color: #3730a3;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.875rem;
+}
+.data-table th {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.data-table th,
+.data-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.85rem 0.75rem;
+  vertical-align: middle;
+}
+.customer-tab {
+  border-bottom: 2px solid transparent;
+  padding: 0.75rem 0.25rem;
+  color: #64748b;
+  font-weight: 600;
+}
+.customer-tab-active {
+  border-color: #4338ca;
+  color: #3730a3;
+}
+.slot-button {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.7rem;
+  background: white;
+  padding: 0.7rem;
+  color: #334155;
+  font-size: 0.875rem;
+}
+.slot-button:hover,
+.slot-button-selected {
+  border-color: #4f46e5;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+@media (max-width: 640px) {
+  .data-table {
+    min-width: 650px;
+  }
 }

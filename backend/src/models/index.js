@@ -28,6 +28,8 @@ const businessSchema = new Schema(
     tenantId: { type: objectId, required: true, unique: true },
     name: { type: String, required: true, trim: true, maxlength: 120 },
     businessType: { type: String, trim: true, maxlength: 80, default: '' },
+    createdByUserId: { type: objectId, ref: 'User', select: false },
+    creationKey: { type: String, select: false },
     status: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
     features: {
       appointments: { type: Boolean, default: false },
@@ -42,17 +44,26 @@ const businessSchema = new Schema(
   },
   baseOptions,
 );
+businessSchema.index(
+  { createdByUserId: 1, creationKey: 1 },
+  { unique: true, partialFilterExpression: { creationKey: { $type: 'string' } } },
+);
 
 const membershipSchema = new Schema(
   {
     tenantId: { type: objectId, required: true, index: true },
     userId: { type: objectId, ref: 'User', required: true, index: true },
     roles: { type: [String], enum: ['owner', 'staff'], required: true },
+    creationKey: { type: String, select: false },
     status: { type: String, enum: ['active', 'inactive'], default: 'active', index: true },
   },
   baseOptions,
 );
 membershipSchema.index({ tenantId: 1, userId: 1 }, { unique: true });
+membershipSchema.index(
+  { userId: 1, creationKey: 1 },
+  { unique: true, partialFilterExpression: { creationKey: { $type: 'string' } } },
+);
 
 const branchSchema = new Schema(
   {

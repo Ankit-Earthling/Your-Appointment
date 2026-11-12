@@ -21,7 +21,7 @@ export function createApp({
     cors({
       origin: frontendOrigin,
       methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'X-Public-Access-Token'],
+      allowedHeaders: ['Content-Type', 'X-Public-Access-Token', 'Idempotency-Key'],
       credentials: true,
     }),
   );

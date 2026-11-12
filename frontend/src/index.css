@@ -139,6 +139,16 @@ button:disabled {
   background: #eef2ff;
   color: #3730a3;
 }
+.nav-group-label {
+  grid-column: 1 / -1;
+  margin-top: 1rem;
+  padding: 0.5rem 0.75rem 0.25rem;
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 .toggle-on {
   background: #eef2ff;
   color: #3730a3;

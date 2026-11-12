@@ -1,25 +1,48 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, NavLink, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
+import QRCode from 'qrcode';
 import { api, businessCreationKey, jsonBody, API } from './lib/api.js';
 
 const ownerNavigation = [
-  ['overview', 'Overview'],
-  ['appointments', 'Appointments'],
-  ['queue', 'Queue Management'],
-  ['customers', 'Customers'],
-  ['staff', 'Staff'],
-  ['services', 'Services'],
-  ['branches', 'Branches'],
-  ['analytics', 'Analytics'],
-  ['settings', 'Business Settings'],
+  { heading: null, items: [['overview', 'Overview']] },
+  {
+    heading: 'Business Management',
+    items: [
+      ['branches', 'Branches'],
+      ['services', 'Services'],
+      ['staff', 'Staff'],
+    ],
+  },
+  {
+    heading: 'Operations',
+    items: [
+      ['appointments', 'Appointments'],
+      ['queue', 'Queue Management'],
+      ['customers', 'Customers'],
+    ],
+  },
+  {
+    heading: 'Insights and Settings',
+    items: [
+      ['analytics', 'Analytics'],
+      ['settings', 'Business Settings'],
+      ['public-booking', 'Public Booking Link'],
+      ['queue-qr', 'QR Entry Links'],
+    ],
+  },
 ];
 const staffNavigation = [
-  ['overview', 'My Overview'],
-  ['appointments', 'My Appointments'],
-  ['queue', 'My Queue'],
-  ['customers', 'Customer Details'],
-  ['schedule', 'My Schedule'],
+  {
+    heading: null,
+    items: [
+      ['overview', 'My Overview'],
+      ['appointments', 'My Appointments'],
+      ['queue', 'My Queue'],
+      ['customers', 'Customer Details'],
+      ['schedule', 'My Schedule'],
+    ],
+  },
 ];
 const weekdays = [1, 2, 3, 4, 5, 6];
 const defaultHours = weekdays.map((dayOfWeek) => ({
@@ -361,16 +384,25 @@ function RoleLayout({
 }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const businessId = selectedBusiness?.id;
-  const navItems = navigation.map(([section, label]) => (
-    <NavLink
-      key={section}
-      onClick={() => setMobileNavOpen(false)}
-      to={`/${role}/${businessId}/${section}`}
-      className={({ isActive }) => `nav-link ${isActive ? 'nav-link-active' : ''}`}
-    >
-      {label}
-    </NavLink>
-  ));
+  const navItems = navigation.flatMap(({ heading, items }) => [
+    ...(heading
+      ? [
+          <p className="nav-group-label" key={`heading-${heading}`}>
+            {heading}
+          </p>,
+        ]
+      : []),
+    ...items.map(([section, label]) => (
+      <NavLink
+        key={section}
+        onClick={() => setMobileNavOpen(false)}
+        to={`/${role}/${businessId}/${section}`}
+        className={({ isActive }) => `nav-link ${isActive ? 'nav-link-active' : ''}`}
+      >
+        {label}
+      </NavLink>
+    )),
+  ]);
   const switchRole =
     role === 'owner'
       ? roleBusinesses(businesses, 'staff')[0]
@@ -812,13 +844,17 @@ function useBusinessData(businessId, branchId, withAnalytics = false) {
     if (failure) setError(failure.reason.message);
     const value = (index, fallback) =>
       results[index]?.status === 'fulfilled' ? results[index].value : fallback;
+    const collection = (index) => {
+      const value = results[index]?.status === 'fulfilled' ? results[index].value : [];
+      return Array.isArray(value) ? value : [];
+    };
     setData({
       business: value(0, {}).business ?? null,
-      branches: value(1, { data: [] }).data,
-      services: value(2, { data: [] }).data,
-      assignments: value(3, { data: [] }).data,
-      appointments: value(4, { data: [] }).data,
-      tickets: value(5, { data: [] }).data,
+      branches: collection(1),
+      services: collection(2),
+      assignments: collection(3),
+      appointments: collection(4),
+      tickets: collection(5),
       analytics: withAnalytics ? value(6, null) : null,
     });
     setLoading(false);
@@ -836,6 +872,8 @@ function WorkspaceShell({
   businessId,
   onBusinessChange,
   onLogout,
+  error,
+  onRetry,
   children,
 }) {
   const navigation = role === 'owner' ? ownerNavigation : staffNavigation;
@@ -850,6 +888,17 @@ function WorkspaceShell({
       onLogout={onLogout}
       navigation={navigation}
     >
+      {error && (
+        <div
+          className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+          role="alert"
+        >
+          <p>{error}</p>
+          <button className="button-secondary" onClick={onRetry}>
+            Retry loading workspace
+          </button>
+        </div>
+      )}
       {children}
     </RoleLayout>
   );
@@ -878,6 +927,8 @@ export function OwnerWorkspace({ session, logout, reloadBusinessMemberships }) {
       businessId={businessId}
       onBusinessChange={(id) => navigate(`/owner/${id}/overview`)}
       onLogout={logout}
+      error={data.error}
+      onRetry={data.refresh}
     >
       <OwnerPage
         section={section}
@@ -913,6 +964,10 @@ function OwnerPage({ section, data, reloadBusinessMemberships, session }) {
           reloadBusinessMemberships={reloadBusinessMemberships}
         />
       );
+    case 'public-booking':
+      return <PublicBookingLinkPage businessId={data.businessId} />;
+    case 'queue-qr':
+      return <QueueQrPage data={data} />;
     default:
       return <OwnerOverview data={data} />;
   }
@@ -986,7 +1041,6 @@ function OwnerOverview({ data }) {
           </Select>
         }
       />
-      <Alert>{data.error}</Alert>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {metrics.map(([label, value, detail]) => (
           <Metric key={label} label={label} value={data.loading ? '—' : value} detail={detail} />
@@ -1306,12 +1360,17 @@ function CustomersPage({ businessId }) {
   const [customers, setCustomers] = useState([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState('');
-  useEffect(() => {
+  const loadCustomers = useCallback(() => {
+    setLoading(true);
+    setError('');
     api(`/businesses/${businessId}/customers`)
-      .then((d) => setCustomers(d.data))
+      .then((customers) => setCustomers(customers))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [businessId]);
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
   return (
     <>
       <PageHeading
@@ -1319,6 +1378,11 @@ function CustomersPage({ businessId }) {
         description="Customer profiles and recent booking activity within your authorized business scope."
       />
       <Alert>{error}</Alert>
+      {error && (
+        <button className="button-secondary mb-5" onClick={loadCustomers}>
+          Retry loading customers
+        </button>
+      )}
       {loading ? (
         <LoadingView label="Loading customers" />
       ) : customers.length ? (
@@ -1452,6 +1516,7 @@ function StaffManagementPage({ data }) {
               <th>Staff member</th>
               <th>Branch</th>
               <th>Services</th>
+              <th>Booked appointments</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -1467,6 +1532,15 @@ function StaffManagementPage({ data }) {
                   {assignment.serviceIds
                     .map((id) => data.services.find((s) => s.id === id)?.name ?? 'Service')
                     .join(', ') || 'All active services'}
+                </td>
+                <td>
+                  {
+                    data.appointments.filter(
+                      (appointment) =>
+                        String(appointment.staffAssignmentId) === String(assignment.id) &&
+                        appointment.status === 'BOOKED',
+                    ).length
+                  }
                 </td>
                 <td>
                   <span
@@ -1793,6 +1867,144 @@ function AnalyticsPage({ data }) {
   );
 }
 
+function PublicBookingLinkPage({ businessId }) {
+  const bookingUrl = `${window.location.origin}/book/${businessId}`;
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  async function copyLink() {
+    setError('');
+    try {
+      await navigator.clipboard.writeText(bookingUrl);
+      setNotice('Booking link copied.');
+    } catch {
+      setError('Copy is unavailable in this browser. Select the link above and copy it.');
+    }
+  }
+  return (
+    <>
+      <PageHeading
+        title="Public Booking Link"
+        description="Share this link so customers can choose a branch, service and available appointment time."
+      />
+      <Alert>{error}</Alert>
+      <Alert type="success">{notice}</Alert>
+      <section className="surface max-w-3xl p-5 sm:p-7">
+        <label className="field-label" htmlFor="public-booking-url">
+          Customer booking page
+        </label>
+        <input
+          id="public-booking-url"
+          className="field-control mt-2"
+          value={bookingUrl}
+          readOnly
+          onFocus={(event) => event.target.select()}
+        />
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button className="button-primary" onClick={copyLink}>
+            Copy booking link
+          </button>
+          <a className="button-secondary" href={bookingUrl} target="_blank" rel="noreferrer">
+            Open booking page
+          </a>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function QueueQrPage({ data }) {
+  const [branchId, setBranchId] = useState('');
+  const [entryUrl, setEntryUrl] = useState('');
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  async function generateQr() {
+    if (!branchId) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await api(
+        `/businesses/${data.businessId}/branches/${branchId}/queue-qr-rotations`,
+        { method: 'POST', body: '{}' },
+      );
+      const image = await QRCode.toDataURL(result.entryUrl, { width: 300, margin: 2 });
+      setEntryUrl(result.entryUrl);
+      setQrDataUrl(image);
+      setNotice('QR entry link generated.');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <PageHeading
+        title="QR Entry Links"
+        description="Generate a branch-specific QR code for customers joining the walk-in queue."
+      />
+      <Alert>{error || data.error}</Alert>
+      <Alert type="success">{notice}</Alert>
+      <section className="surface grid max-w-4xl gap-6 p-5 sm:p-7 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+        <div>
+          <Select
+            label="Branch"
+            value={branchId}
+            onChange={(event) => setBranchId(event.target.value)}
+          >
+            <option value="">Choose a branch</option>
+            {data.branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.name}
+              </option>
+            ))}
+          </Select>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Refreshing a branch QR revokes its previous entry link. Replace any printed QR after
+            generating a new one.
+          </p>
+          <button className="button-primary mt-4" disabled={!branchId || busy} onClick={generateQr}>
+            {busy ? 'Generating…' : entryUrl ? 'Refresh QR entry link' : 'Generate QR entry link'}
+          </button>
+          {entryUrl && (
+            <div className="mt-5">
+              <label className="field-label" htmlFor="queue-entry-url">
+                Branch queue entry URL
+              </label>
+              <input
+                id="queue-entry-url"
+                className="field-control mt-2"
+                value={entryUrl}
+                readOnly
+                onFocus={(event) => event.target.select()}
+              />
+              <a
+                className="mt-3 inline-flex text-sm font-semibold text-indigo-700 hover:underline"
+                href={entryUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open queue entry page
+              </a>
+            </div>
+          )}
+        </div>
+        {qrDataUrl && (
+          <div className="w-fit rounded-2xl border border-slate-200 bg-white p-3">
+            <img
+              className="h-60 w-60 max-w-full"
+              src={qrDataUrl}
+              alt="Branch queue entry QR code"
+            />
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
 function BusinessSettingsPage({ data, session, reloadBusinessMemberships }) {
   const [name, setName] = useState(''),
     [businessType, setBusinessType] = useState(''),
@@ -1917,6 +2129,8 @@ export function StaffWorkspace({ session, logout }) {
       businessId={businessId}
       onBusinessChange={(id) => navigate(`/staff/${id}/overview`)}
       onLogout={logout}
+      error={data.error}
+      onRetry={data.refresh}
     >
       <StaffPage section={section} data={{ ...data, branchId, setBranchId }} />
     </WorkspaceShell>
@@ -2104,14 +2318,17 @@ export function CustomerAppointments({ session, logout }) {
   const [appointments, setAppointments] = useState([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState('');
-  const refresh = () =>
-    api('/me/appointments')
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError('');
+    return api('/me/appointments')
       .then((data) => setAppointments(data))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+  }, []);
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
   async function cancel(id) {
     setError('');
     try {
@@ -2136,6 +2353,11 @@ export function CustomerAppointments({ session, logout }) {
         description="Your own upcoming bookings and appointment history."
       />
       <Alert>{error}</Alert>
+      {error && (
+        <button className="button-secondary mb-5" onClick={refresh}>
+          Retry loading appointments
+        </button>
+      )}
       {loading ? (
         <LoadingView label="Loading your appointments" />
       ) : appointments.length ? (
@@ -2201,9 +2423,11 @@ function CustomerAppointmentRow({ appointment, onCancel }) {
 export function CustomerQueue({ session, logout }) {
   const [tickets, setTickets] = useState([]),
     [updates, setUpdates] = useState({}),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     let sockets = [];
+    setError('');
     api('/me/queue-tickets')
       .then(async (items) => {
         setTickets(items);
@@ -2235,7 +2459,7 @@ export function CustomerQueue({ session, logout }) {
       })
       .catch((e) => setError(e.message));
     return () => sockets.forEach((socket) => socket.disconnect());
-  }, []);
+  }, [reloadKey]);
   return (
     <CustomerShell session={session} logout={logout} active="queue">
       <PageHeading
@@ -2244,6 +2468,11 @@ export function CustomerQueue({ session, logout }) {
         description="Your ticket numbers and statuses. Private queue details are never shown."
       />
       <Alert>{error}</Alert>
+      {error && (
+        <button className="button-secondary mb-5" onClick={() => setReloadKey((key) => key + 1)}>
+          Retry loading queue tickets
+        </button>
+      )}
       {tickets.length ? (
         tickets.map((ticket) => {
           const live = updates[ticket._id];
@@ -2273,6 +2502,35 @@ export function CustomerQueue({ session, logout }) {
           description="Use a branch QR link to join a walk-in queue. Your ticket will appear here when you are signed in."
         />
       )}
+    </CustomerShell>
+  );
+}
+
+export function CustomerAccount({ session, logout }) {
+  return (
+    <CustomerShell session={session} logout={logout}>
+      <PageHeading
+        eyebrow="Customer area"
+        title="Account"
+        description="Your signed-in customer identity. It is separate from any business membership."
+      />
+      <section className="surface grid max-w-2xl gap-5 p-5 sm:grid-cols-2 sm:p-7">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Name</p>
+          <p className="mt-2 font-medium text-slate-900">{session.user.displayName}</p>
+        </div>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Email</p>
+          <p className="mt-2 break-all font-medium text-slate-900">{session.user.email}</p>
+        </div>
+        <p className="text-sm leading-6 text-slate-600 sm:col-span-2">
+          To make an appointment, open the booking link shared by the business. Guest bookings do
+          not require an account.
+        </p>
+        <button className="button-secondary sm:col-span-2 sm:justify-self-start" onClick={logout}>
+          Sign out
+        </button>
+      </section>
     </CustomerShell>
   );
 }
@@ -2308,6 +2566,12 @@ function CustomerShell({ session, logout, children }) {
             to="/customer/queue"
           >
             Queue Tracking
+          </NavLink>
+          <NavLink
+            className={({ isActive }) => `customer-tab ${isActive ? 'customer-tab-active' : ''}`}
+            to="/customer/account"
+          >
+            Account
           </NavLink>
         </nav>
         {children}
@@ -2372,7 +2636,7 @@ export function PublicBooking({ user, sessionLoading }) {
     [confirmation, setConfirmation] = useState(null);
   useEffect(() => {
     api(`/public/businesses/${businessId}/branches?flow=appointments`)
-      .then((d) => setBranches(d.data))
+      .then((branches) => setBranches(branches))
       .catch((e) => setError(e.message));
   }, [businessId]);
   useEffect(() => {
@@ -2381,7 +2645,7 @@ export function PublicBooking({ user, sessionLoading }) {
       return;
     }
     api(`/public/branches/${branch}/services?flow=appointments`)
-      .then((d) => setServices(d.data))
+      .then((services) => setServices(services))
       .catch((e) => setError(e.message));
   }, [branch]);
   useEffect(() => {
@@ -2464,6 +2728,15 @@ export function PublicBooking({ user, sessionLoading }) {
             Book as a guest. You can optionally sign in to keep your bookings in your account.
           </p>
           <Alert>{error}</Alert>
+          {error && (
+            <button
+              className="button-secondary"
+              type="button"
+              onClick={() => window.location.reload()}
+            >
+              Retry booking page
+            </button>
+          )}
           <form onSubmit={book} className="mt-7 grid gap-5">
             <Select
               label="Branch"
@@ -2621,6 +2894,11 @@ export function QueueEntry() {
           Enter your details to receive a private ticket and live status updates.
         </p>
         <Alert>{error}</Alert>
+        {error && (
+          <button className="button-secondary mb-5" onClick={() => window.location.reload()}>
+            Reload queue entry link
+          </button>
+        )}
         {ticket ? (
           <div className="mt-7 rounded-2xl bg-indigo-50 p-6">
             <p className="text-sm font-semibold text-indigo-800">Your ticket</p>

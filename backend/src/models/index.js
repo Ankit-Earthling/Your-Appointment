@@ -116,6 +116,8 @@ const customerProfileSchema = new Schema(
     displayName: { type: String, required: true, trim: true, maxlength: 100 },
     email: { type: String, lowercase: true, trim: true, maxlength: 254, default: '' },
     phone: { type: String, trim: true, maxlength: 30, default: '' },
+    emailVerifiedAt: { type: Date, default: null },
+    phoneVerifiedAt: { type: Date, default: null },
   },
   baseOptions,
 );
@@ -218,7 +220,24 @@ const queueTicketSchema = new Schema(
     serviceId: { type: objectId, ref: 'Service', required: true, index: true },
     queueConfigurationId: { type: objectId, ref: 'QueueConfiguration', required: true },
     customerUserId: { type: objectId, ref: 'User', default: null, index: true },
-    customerProfileId: { type: objectId, ref: 'CustomerProfile', required: true },
+    customerProfileId: { type: objectId, ref: 'CustomerProfile', default: null },
+    customerSnapshot: {
+      displayName: { type: String, required: true, trim: true, maxlength: 100 },
+      email: { type: String, trim: true, maxlength: 254, default: '' },
+      phone: { type: String, trim: true, maxlength: 30, default: '' },
+    },
+    profileConsentAt: { type: Date, default: null },
+    profileCreatedAt: { type: Date, default: null },
+    calledAt: { type: Date, default: null },
+    serviceStartedAt: { type: Date, default: null },
+    completedAt: { type: Date, default: null },
+    cancelledAt: { type: Date, default: null },
+    noShowAt: { type: Date, default: null },
+    calledByUserId: { type: objectId, ref: 'User', default: null },
+    servingStaffUserId: { type: objectId, ref: 'User', default: null },
+    completedByUserId: { type: objectId, ref: 'User', default: null },
+    cancelledByUserId: { type: objectId, ref: 'User', default: null },
+    noShowByUserId: { type: objectId, ref: 'User', default: null },
     localDate: { type: String, required: true, index: true },
     sequenceNumber: { type: Number, required: true },
     status: {
@@ -252,6 +271,14 @@ queueTicketSchema.index(
   { unique: true },
 );
 queueTicketSchema.index({ tenantId: 1, queueConfigurationId: 1, localDate: 1, status: 1 });
+queueTicketSchema.index({
+  tenantId: 1,
+  branchId: 1,
+  serviceId: 1,
+  localDate: 1,
+  status: 1,
+  sequenceNumber: 1,
+});
 
 const publicAccessTokenSchema = new Schema(
   {

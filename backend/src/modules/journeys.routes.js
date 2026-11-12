@@ -11,6 +11,7 @@ import {
   ReservationCalendar,
   Service,
   StaffAssignment,
+  User,
 } from '../models/index.js';
 import { AppError, asyncRoute } from '../lib/errors.js';
 import { issuePublicToken, verifyPublicToken } from '../lib/public-tokens.js';
@@ -48,6 +49,7 @@ const join = z
     phone: z.string().trim().max(30).optional(),
   })
   .strict();
+const callNextBody = z.object({ serviceId: id }).strict();
 const statusBody = z
   .object({ status: z.enum(['CALLED', 'SERVING', 'COMPLETED', 'NO_SHOW', 'CANCELLED']) })
   .strict();
@@ -67,7 +69,14 @@ async function customer(tenantId, user, body) {
   });
 }
 function emitQueue(tenantId, branchId, payload) {
-  ioRef()?.to(`tenant:${tenantId}:branch:${branchId}`).emit('queue.updated', payload);
+  const io = ioRef();
+  if (!io) return;
+  io.to(`tenant:${tenantId}:branch:${branchId}`).emit('queue.updated', payload);
+  if (payload.serviceId)
+    io.to(`tenant:${tenantId}:branch:${branchId}:service:${payload.serviceId}`).emit(
+      'queue.updated',
+      payload,
+    );
 }
 
 router.get(
@@ -479,9 +488,8 @@ router.post(
       throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Branch was not found.');
     if (!business.features.walkInQueue)
       throw new AppError(403, 'FEATURE_DISABLED', 'Walk-in queue is disabled.');
-    if (req.user && !business.features.customerAccounts)
-      throw new AppError(403, 'FEATURE_DISABLED', 'Customer accounts are disabled.');
-    if (!req.user && !business.features.guestBooking)
+    const accountUser = req.user && business.features.customerAccounts ? req.user : null;
+    if (!accountUser && !business.features.guestBooking)
       throw new AppError(403, 'FEATURE_DISABLED', 'Guest queue entry is disabled.');
     const service = await Service.findOne({
       _id: req.body.serviceId,
@@ -499,26 +507,46 @@ router.post(
     });
     if (!config) throw new AppError(409, 'QUEUE_CLOSED', 'This queue is closed.');
     const date = localDate(new Date(), branch.timezone);
-    const counter = await QueueCounter.findOneAndUpdate(
-      { tenantId: business._id, queueConfigurationId: config._id, localDate: date },
-      {
-        $inc: { currentNumber: 1 },
-        $setOnInsert: { tenantId: business._id, queueConfigurationId: config._id, localDate: date },
-      },
-      { upsert: true, returnDocument: 'after' },
-    );
-    const profile = await customer(business._id, req.user, req.body);
+    let counter;
+    try {
+      counter = await QueueCounter.findOneAndUpdate(
+        { tenantId: business._id, queueConfigurationId: config._id, localDate: date },
+        {
+          $inc: { currentNumber: 1 },
+          $setOnInsert: {
+            tenantId: business._id,
+            queueConfigurationId: config._id,
+            localDate: date,
+          },
+        },
+        { upsert: true, returnDocument: 'after' },
+      );
+    } catch (error) {
+      if (error.code !== 11000) throw error;
+      counter = await QueueCounter.findOneAndUpdate(
+        { tenantId: business._id, queueConfigurationId: config._id, localDate: date },
+        { $inc: { currentNumber: 1 } },
+        { returnDocument: 'after' },
+      );
+    }
+    const joinedAt = new Date();
     const ticket = await QueueTicket.create({
       tenantId: business._id,
       branchId: branch._id,
       serviceId: service._id,
       queueConfigurationId: config._id,
-      customerUserId: req.user?._id ?? null,
-      customerProfileId: profile._id,
+      customerUserId: accountUser?._id ?? null,
+      customerProfileId: null,
+      customerSnapshot: {
+        displayName: accountUser?.displayName ?? req.body.displayName,
+        email: accountUser?.email ?? req.body.email ?? '',
+        phone: req.body.phone ?? '',
+      },
       localDate: date,
       sequenceNumber: counter.currentNumber,
       status: 'WAITING',
-      statusHistory: [{ status: 'WAITING', at: new Date(), actorUserId: req.user?._id ?? null }],
+      joinedAt,
+      statusHistory: [{ status: 'WAITING', at: joinedAt, actorUserId: accountUser?._id ?? null }],
     });
     const accessToken = await issuePublicToken({
       tenantId: business._id,
@@ -528,17 +556,22 @@ router.post(
     });
     emitQueue(business._id, branch._id, {
       ticketId: ticket._id,
+      serviceId: service._id,
       status: 'WAITING',
       sequenceNumber: ticket.sequenceNumber,
     });
     ioRef()?.to(`queue-ticket:${ticket._id}`).emit('ticket.updated', {
       ticketId: ticket._id,
+      serviceId: service._id,
       status: 'WAITING',
       sequenceNumber: ticket.sequenceNumber,
     });
     res.status(201).json({
       data: {
         ticket: { id: ticket._id, sequenceNumber: ticket.sequenceNumber, status: ticket.status },
+        service: { id: service._id, name: service.name },
+        branch: { id: branch._id, name: branch.name, timezone: branch.timezone },
+        joinedAt,
         accessToken,
       },
     });
@@ -554,9 +587,12 @@ router.get(
       purpose: 'queue_ticket',
       resourceId: req.params.ticketId,
     });
-    const t = await QueueTicket.findById(req.params.ticketId).select(
-      'tenantId branchId queueConfigurationId sequenceNumber status localDate',
-    );
+    const t = await QueueTicket.findById(req.params.ticketId)
+      .select(
+        'tenantId branchId serviceId queueConfigurationId sequenceNumber status localDate joinedAt calledAt serviceStartedAt',
+      )
+      .populate('serviceId', 'name')
+      .populate('branchId', 'name timezone');
     if (!t) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Ticket was not found.');
     const ahead = await QueueTicket.countDocuments({
       tenantId: t.tenantId,
@@ -572,9 +608,150 @@ router.get(
           sequenceNumber: t.sequenceNumber,
           status: t.status,
           peopleAhead: ahead,
+          service: t.serviceId && { id: t.serviceId._id, name: t.serviceId.name },
+          branch: t.branchId && {
+            id: t.branchId._id,
+            name: t.branchId.name,
+            timezone: t.branchId.timezone,
+          },
+          joinedAt: t.joinedAt,
+          calledAt: t.calledAt,
+          serviceStartedAt: t.serviceStartedAt,
         },
       },
     });
+  }),
+);
+router.patch(
+  '/public/queue-tickets/:ticketId/leave',
+  publicFlowLimiter,
+  validateObjectIds('ticketId'),
+  asyncRoute(async (req, res) => {
+    await verifyPublicToken({
+      token: req.get('x-public-access-token'),
+      purpose: 'queue_ticket',
+      resourceId: req.params.ticketId,
+    });
+    const at = new Date();
+    const ticket = await QueueTicket.findOneAndUpdate(
+      { _id: req.params.ticketId, status: { $in: ['WAITING', 'CALLED'] } },
+      {
+        $set: { status: 'CANCELLED', cancelledAt: at },
+        $push: { statusHistory: { status: 'CANCELLED', at, actorUserId: null } },
+      },
+      { returnDocument: 'after' },
+    );
+    if (!ticket)
+      throw new AppError(409, 'INVALID_TRANSITION', 'This ticket can no longer be left.');
+    emitQueue(ticket.tenantId, ticket.branchId, {
+      ticketId: ticket._id,
+      serviceId: ticket.serviceId,
+      status: ticket.status,
+      sequenceNumber: ticket.sequenceNumber,
+    });
+    ioRef()?.to(`queue-ticket:${ticket._id}`).emit('ticket.updated', {
+      ticketId: ticket._id,
+      serviceId: ticket.serviceId,
+      status: ticket.status,
+      sequenceNumber: ticket.sequenceNumber,
+    });
+    res.json({ data: { id: ticket._id, status: ticket.status, cancelledAt: ticket.cancelledAt } });
+  }),
+);
+router.post(
+  '/public/queue-tickets/:ticketId/profile',
+  publicFlowLimiter,
+  validateObjectIds('ticketId'),
+  validate(
+    z
+      .object({
+        consent: z.literal(true),
+        displayName: z.string().trim().min(2).max(100).optional(),
+        email: z.string().trim().email().max(254).optional(),
+        phone: z.string().trim().max(30).optional(),
+      })
+      .strict(),
+  ),
+  asyncRoute(async (req, res) => {
+    await verifyPublicToken({
+      token: req.get('x-public-access-token'),
+      purpose: 'queue_ticket',
+      resourceId: req.params.ticketId,
+    });
+    const ticket = await QueueTicket.findById(req.params.ticketId);
+    if (!ticket) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Ticket was not found.');
+    if (ticket.status !== 'COMPLETED')
+      throw new AppError(
+        409,
+        'INVALID_TRANSITION',
+        'A profile can be saved after service is complete.',
+      );
+    if (ticket.profileCreatedAt && ticket.customerProfileId)
+      return res.status(200).json({ data: { saved: true } });
+    const legacyProfile = ticket.customerProfileId
+      ? await CustomerProfile.findOne({ _id: ticket.customerProfileId, tenantId: ticket.tenantId })
+      : null;
+    const snapshot = ticket.customerSnapshot ?? {
+      displayName: legacyProfile?.displayName ?? 'Customer',
+      email: legacyProfile?.email ?? '',
+      phone: legacyProfile?.phone ?? '',
+    };
+    const email = req.body.email ?? snapshot.email;
+    const phone = req.body.phone ?? snapshot.phone;
+    let profile = null;
+    if (ticket.customerUserId) {
+      profile = await CustomerProfile.findOne({
+        tenantId: ticket.tenantId,
+        userId: ticket.customerUserId,
+      });
+    }
+    if (!profile) {
+      const verifiedContact = [];
+      if (email)
+        verifiedContact.push({ email: email.toLowerCase(), emailVerifiedAt: { $ne: null } });
+      if (phone) verifiedContact.push({ phone, phoneVerifiedAt: { $ne: null } });
+      if (verifiedContact.length)
+        profile = await CustomerProfile.findOne({
+          tenantId: ticket.tenantId,
+          $or: verifiedContact,
+        });
+    }
+    if (!profile) {
+      profile = await CustomerProfile.create({
+        tenantId: ticket.tenantId,
+        displayName: req.body.displayName ?? snapshot.displayName,
+        email,
+        phone,
+      });
+    }
+    const consentAt = new Date();
+    const claimed = await QueueTicket.findOneAndUpdate(
+      { _id: ticket._id, tenantId: ticket.tenantId, status: 'COMPLETED', profileCreatedAt: null },
+      {
+        $set: {
+          customerProfileId: profile._id,
+          profileConsentAt: consentAt,
+          profileCreatedAt: consentAt,
+        },
+      },
+      { returnDocument: 'after' },
+    );
+    if (!claimed) {
+      if (!ticket.customerUserId && profile._id !== ticket.customerProfileId)
+        await CustomerProfile.deleteOne({ _id: profile._id, tenantId: ticket.tenantId });
+      const latest = await QueueTicket.findById(ticket._id).select('profileCreatedAt');
+      if (!latest?.profileCreatedAt)
+        throw new AppError(409, 'PROFILE_SAVE_CONFLICT', 'Please try saving your profile again.');
+      return res.json({ data: { saved: true } });
+    }
+    await recordAudit({
+      tenantId: ticket.tenantId,
+      action: 'queue.profile_opted_in',
+      resourceType: 'queue_ticket',
+      resourceId: ticket._id,
+      summary: 'Customer explicitly opted in to save a business profile.',
+    });
+    res.status(201).json({ data: { saved: true } });
   }),
 );
 router.get(
@@ -587,6 +764,11 @@ router.get(
       throw new AppError(403, 'FORBIDDEN', 'Not authorized.');
     const query = { tenantId: req.tenantId };
     if (req.query.branchId) query.branchId = req.query.branchId;
+    if (req.query.serviceId) {
+      if (!/^[a-f\d]{24}$/i.test(req.query.serviceId))
+        throw new AppError(400, 'VALIDATION_ERROR', 'serviceId must be valid.');
+      query.serviceId = req.query.serviceId;
+    }
     if (req.membership.roles.includes('staff') && !req.membership.roles.includes('owner')) {
       const as = await StaffAssignment.find({
         tenantId: req.tenantId,
@@ -594,11 +776,31 @@ router.get(
         status: 'active',
       });
       query.branchId = { $in: as.map((a) => a.branchId) };
+      const allServices = as.some((assignment) => assignment.serviceIds.length === 0);
+      const serviceIds = allServices
+        ? (
+            await Service.find({
+              tenantId: req.tenantId,
+              branchIds: { $in: as.map((item) => item.branchId) },
+              status: 'active',
+              queueEnabled: true,
+            }).select('_id')
+          ).map((service) => String(service._id))
+        : [...new Set(as.flatMap((assignment) => assignment.serviceIds.map(String)))];
+      query.serviceId = query.serviceId
+        ? { $in: serviceIds.filter((serviceId) => serviceId === req.query.serviceId) }
+        : { $in: serviceIds };
     }
     const tickets = await QueueTicket.find(query)
-      .sort({ sequenceNumber: 1 })
+      .sort({ joinedAt: 1 })
       .limit(200)
-      .select('-customerUserId -customerProfileId');
+      .select('-customerUserId -customerProfileId')
+      .populate('serviceId', 'name')
+      .populate('branchId', 'name timezone')
+      .populate(
+        'calledByUserId servingStaffUserId completedByUserId noShowByUserId cancelledByUserId',
+        'displayName',
+      );
     res.json({ data: tickets });
   }),
 );
@@ -609,14 +811,37 @@ router.post(
   resolveMembership,
   requireRole('owner', 'staff'),
   requireBranchScope,
+  validate(callNextBody),
   asyncRoute(async (req, res) => {
     const config = await QueueConfiguration.findOne({
       tenantId: req.tenantId,
       branchId: req.params.branchId,
+      serviceId: req.body.serviceId,
       isOpen: true,
     });
     if (!config) throw new AppError(409, 'QUEUE_CLOSED', 'Queue is closed.');
-    const date = localDate(new Date(), (await Branch.findById(req.params.branchId)).timezone);
+    const service = await Service.findOne({
+      _id: req.body.serviceId,
+      tenantId: req.tenantId,
+      branchIds: req.params.branchId,
+      status: 'active',
+      queueEnabled: true,
+    });
+    if (!service) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Service was not found.');
+    if (
+      !req.membership.roles.includes('owner') &&
+      !(await StaffAssignment.exists({
+        tenantId: req.tenantId,
+        membershipId: req.membership._id,
+        branchId: req.params.branchId,
+        status: 'active',
+        $or: [{ serviceIds: service._id }, { serviceIds: { $size: 0 } }],
+      }))
+    )
+      throw new AppError(403, 'FORBIDDEN', 'This service is outside your assignment.');
+    const branch = await Branch.findOne({ _id: req.params.branchId, tenantId: req.tenantId });
+    const date = localDate(new Date(), branch.timezone);
+    const at = new Date();
     const ticket = await QueueTicket.findOneAndUpdate(
       {
         tenantId: req.tenantId,
@@ -626,19 +851,21 @@ router.post(
         status: 'WAITING',
       },
       {
-        $set: { status: 'CALLED' },
-        $push: { statusHistory: { status: 'CALLED', at: new Date(), actorUserId: req.user._id } },
+        $set: { status: 'CALLED', calledAt: at, calledByUserId: req.user._id },
+        $push: { statusHistory: { status: 'CALLED', at, actorUserId: req.user._id } },
       },
       { sort: { sequenceNumber: 1 }, returnDocument: 'after' },
     );
     if (!ticket) throw new AppError(409, 'NO_WAITING_TICKETS', 'There are no waiting tickets.');
     emitQueue(req.tenantId, req.params.branchId, {
       ticketId: ticket._id,
+      serviceId: ticket.serviceId,
       status: 'CALLED',
       sequenceNumber: ticket.sequenceNumber,
     });
     ioRef()?.to(`queue-ticket:${ticket._id}`).emit('ticket.updated', {
       ticketId: ticket._id,
+      serviceId: ticket.serviceId,
       status: 'CALLED',
       sequenceNumber: ticket.sequenceNumber,
     });
@@ -664,6 +891,7 @@ router.patch(
         membershipId: req.membership._id,
         branchId: ticket.branchId,
         status: 'active',
+        $or: [{ serviceIds: ticket.serviceId }, { serviceIds: { $size: 0 } }],
       }))
     )
       throw new AppError(403, 'FORBIDDEN', 'This branch is outside your assignment.');
@@ -679,20 +907,223 @@ router.patch(
     };
     if (!transitions[ticket.status]?.includes(parsed.data.status))
       throw new AppError(409, 'INVALID_TRANSITION', 'Queue status transition is not allowed.');
-    ticket.status = parsed.data.status;
-    ticket.statusHistory.push({ status: ticket.status, at: new Date(), actorUserId: req.user._id });
-    await ticket.save();
+    const status = parsed.data.status;
+    const at = new Date();
+    const set = { status };
+    const actorField = {
+      SERVING: 'servingStaffUserId',
+      COMPLETED: 'completedByUserId',
+      NO_SHOW: 'noShowByUserId',
+      CANCELLED: 'cancelledByUserId',
+    }[status];
+    const timestampField = {
+      SERVING: 'serviceStartedAt',
+      COMPLETED: 'completedAt',
+      NO_SHOW: 'noShowAt',
+      CANCELLED: 'cancelledAt',
+    }[status];
+    set[timestampField] = at;
+    if (actorField) set[actorField] = req.user._id;
+    if (status === 'SERVING') set.servingStaffUserId = req.user._id;
+    const updated = await QueueTicket.findOneAndUpdate(
+      { _id: ticket._id, tenantId: req.tenantId, status: ticket.status },
+      { $set: set, $push: { statusHistory: { status, at, actorUserId: req.user._id } } },
+      { returnDocument: 'after' },
+    );
+    if (!updated)
+      throw new AppError(
+        409,
+        'INVALID_TRANSITION',
+        'Ticket status changed; refresh before acting again.',
+      );
     emitQueue(req.tenantId, ticket.branchId, {
       ticketId: ticket._id,
-      status: ticket.status,
+      serviceId: ticket.serviceId,
+      status: updated.status,
       sequenceNumber: ticket.sequenceNumber,
     });
     ioRef()?.to(`queue-ticket:${ticket._id}`).emit('ticket.updated', {
       ticketId: ticket._id,
-      status: ticket.status,
+      serviceId: ticket.serviceId,
+      status: updated.status,
       sequenceNumber: ticket.sequenceNumber,
     });
-    res.json({ data: { id: ticket._id, status: ticket.status } });
+    res.json({ data: { id: ticket._id, status: updated.status, at } });
+  }),
+);
+
+router.get(
+  '/businesses/:businessId/branches/:branchId/queue-monitor',
+  authenticate,
+  validateObjectIds('businessId', 'branchId'),
+  resolveMembership,
+  requireRole('owner'),
+  asyncRoute(async (req, res) => {
+    const branch = await Branch.findOne({
+      _id: req.params.branchId,
+      tenantId: req.tenantId,
+      status: 'active',
+    });
+    if (!branch) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Branch was not found.');
+    if (!req.business.features.walkInQueue)
+      throw new AppError(403, 'FEATURE_DISABLED', 'Walk-in queue is disabled.');
+    const services = await Service.find({
+      tenantId: req.tenantId,
+      branchIds: branch._id,
+      status: 'active',
+      queueEnabled: true,
+    }).sort({ name: 1 });
+    const date = localDate(new Date(), branch.timezone);
+    const [configs, tickets, assignments] = await Promise.all([
+      QueueConfiguration.find({ tenantId: req.tenantId, branchId: branch._id, isOpen: true }),
+      QueueTicket.find({
+        tenantId: req.tenantId,
+        branchId: branch._id,
+        localDate: date,
+        status: { $in: ['WAITING', 'CALLED', 'SERVING'] },
+      }).sort({ sequenceNumber: 1 }),
+      StaffAssignment.find({
+        tenantId: req.tenantId,
+        branchId: branch._id,
+        status: 'active',
+      }).populate('membershipId', 'userId'),
+    ]);
+    const memberships = assignments.map((item) => item.membershipId).filter(Boolean);
+    const assignedIds = memberships.map((item) => String(item.userId));
+    const actorIds = tickets.flatMap((ticket) =>
+      [ticket.calledByUserId, ticket.servingStaffUserId].filter(Boolean).map(String),
+    );
+    const users = await User.find({
+      _id: { $in: [...new Set([...assignedIds, ...actorIds])] },
+    }).select('displayName');
+    const userById = new Map(users.map((user) => [String(user._id), user]));
+    const ticketByService = new Map();
+    for (const ticket of tickets) {
+      const serviceKey = String(ticket.serviceId);
+      const items = ticketByService.get(serviceKey) ?? [];
+      items.push(ticket);
+      ticketByService.set(serviceKey, items);
+    }
+    const rooms = services
+      .filter((service) =>
+        configs.some((config) => String(config.serviceId) === String(service._id)),
+      )
+      .map((service) => {
+        const serviceTickets = ticketByService.get(String(service._id)) ?? [];
+        const current =
+          serviceTickets.find((ticket) => ['CALLED', 'SERVING'].includes(ticket.status)) ??
+          serviceTickets.find((ticket) => ticket.status === 'WAITING') ??
+          null;
+        const activeAssignments = assignments.filter(
+          (assignment) =>
+            !assignment.serviceIds.length ||
+            assignment.serviceIds.some((serviceId) => String(serviceId) === String(service._id)),
+        );
+        return {
+          service: { id: service._id, name: service.name },
+          branch: { id: branch._id, name: branch.name, timezone: branch.timezone },
+          waitingCount: serviceTickets.filter((ticket) => ticket.status === 'WAITING').length,
+          current: current
+            ? {
+                ticketId: current._id,
+                sequenceNumber: current.sequenceNumber,
+                status: current.status,
+                displayName: current.customerSnapshot?.displayName ?? 'Customer',
+                joinedAt: current.joinedAt,
+                calledAt: current.calledAt,
+                serviceStartedAt: current.serviceStartedAt,
+                servingStaff:
+                  current.status === 'SERVING'
+                    ? (userById.get(String(current.servingStaffUserId))?.displayName ?? null)
+                    : null,
+              }
+            : null,
+          state: current?.status ?? 'IDLE',
+          assignedStaff: activeAssignments.map((assignment) => {
+            const membership = assignment.membershipId;
+            const staffUser = membership && userById.get(String(membership.userId));
+            const workload = serviceTickets.filter(
+              (ticket) =>
+                ['CALLED', 'SERVING'].includes(ticket.status) &&
+                String(ticket.servingStaffUserId ?? ticket.calledByUserId) ===
+                  String(membership?.userId),
+            ).length;
+            return {
+              id: membership?.userId,
+              displayName: staffUser?.displayName ?? 'Staff',
+              available: workload === 0,
+              currentWorkload: workload,
+            };
+          }),
+        };
+      });
+    res.json({
+      data: {
+        branch: { id: branch._id, name: branch.name, timezone: branch.timezone },
+        rooms,
+        generatedAt: new Date(),
+      },
+    });
+  }),
+);
+
+router.get(
+  '/businesses/:businessId/queue-activity',
+  authenticate,
+  validateObjectIds('businessId'),
+  resolveMembership,
+  requireRole('owner'),
+  asyncRoute(async (req, res) => {
+    if (!req.query.branchId || !/^[a-f\d]{24}$/i.test(req.query.branchId))
+      throw new AppError(400, 'VALIDATION_ERROR', 'A valid branchId is required.');
+    const branch = await Branch.findOne({ _id: req.query.branchId, tenantId: req.tenantId });
+    if (!branch) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Branch was not found.');
+    const tickets = await QueueTicket.find({ tenantId: req.tenantId, branchId: branch._id })
+      .sort({ joinedAt: -1 })
+      .limit(250)
+      .populate('serviceId', 'name')
+      .select('serviceId sequenceNumber customerSnapshot joinedAt serviceStartedAt statusHistory');
+    const actorIds = [
+      ...new Set(
+        tickets.flatMap((ticket) =>
+          ticket.statusHistory
+            .map((event) => event.actorUserId)
+            .filter(Boolean)
+            .map(String),
+        ),
+      ),
+    ];
+    const actors = await User.find({ _id: { $in: actorIds } }).select('displayName');
+    const actorById = new Map(actors.map((actor) => [String(actor._id), actor.displayName]));
+    const entries = tickets
+      .flatMap((ticket) =>
+        ticket.statusHistory.map((event, index) => {
+          const startedAt =
+            ticket.serviceStartedAt ??
+            ticket.statusHistory.slice(0, index + 1).findLast((entry) => entry.status === 'SERVING')
+              ?.at;
+          const durationStart = event.status === 'CALLED' ? ticket.joinedAt : startedAt;
+          const durationMinutes =
+            (event.status === 'CALLED' || event.status === 'COMPLETED') && durationStart
+              ? Math.max(0, Math.floor((new Date(event.at) - new Date(durationStart)) / 60000))
+              : null;
+          return {
+            at: event.at,
+            service: ticket.serviceId?.name ?? 'Service',
+            sequenceNumber: ticket.sequenceNumber,
+            customer: ticket.customerSnapshot?.displayName ?? 'Anonymous customer',
+            action: event.status,
+            staff: event.actorUserId ? (actorById.get(String(event.actorUserId)) ?? 'Staff') : null,
+            joinedAt: ticket.joinedAt,
+            durationMinutes,
+          };
+        }),
+      )
+      .sort((a, b) => new Date(b.at) - new Date(a.at))
+      .slice(0, 250);
+    res.json({
+      data: { branch: { id: branch._id, name: branch.name, timezone: branch.timezone }, entries },
+    });
   }),
 );
 

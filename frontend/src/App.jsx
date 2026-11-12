@@ -13,6 +13,7 @@ import {
   OwnerWorkspace,
   PublicBooking,
   QueueEntry,
+  PublicQueueTicket,
   StaffWorkspace,
   StaffPending,
 } from './RolePages.jsx';
@@ -248,6 +249,7 @@ export default function App() {
           element={<PublicBooking user={session.user} sessionLoading={session.loading} />}
         />
         <Route path="/queue/entry/:credential" element={<QueueEntry />} />
+        <Route path="/queue/ticket/:ticketId" element={<PublicQueueTicket />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ApplicationErrorBoundary>

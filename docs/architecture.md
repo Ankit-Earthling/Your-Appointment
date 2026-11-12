@@ -1,11 +1,11 @@
 # System Architecture — Your Appointment
 
-| Document attribute | Value |
-|---|---|
-| Status | Initial architecture baseline for review |
-| Requirements baseline | SRS version 0.2 |
-| Version | 0.1 |
-| Last updated | 2026-11-11 |
+| Document attribute    | Value                                    |
+| --------------------- | ---------------------------------------- |
+| Status                | Initial architecture baseline for review |
+| Requirements baseline | SRS version 0.2                          |
+| Version               | 0.1                                      |
+| Last updated          | 2026-11-11                               |
 
 This document describes the conceptual software architecture for Your Appointment. It complements, and does not replace, the requirements in [SRS.md](SRS.md). The design intentionally leaves product policies marked TBD in the SRS unresolved. It does not define database schemas, endpoint contracts, or implementation code.
 
@@ -75,19 +75,19 @@ The browser is untrusted: it can present user input and a requested business con
 
 ## 4. Technology Stack and Responsibilities
 
-| Technology | Architectural responsibility | Boundary |
-|---|---|---|
-| React | Renders the browser user interface and composes reusable screens and components. | Does not make authoritative authorization, availability, or queue decisions. |
-| Vite | Development server and frontend build tooling. | Build tooling, not a runtime backend or product service. |
-| Tailwind CSS | Frontend styling system. | Presentation only. |
-| Node.js | Backend runtime for the modular monolith. | Hosts the application and real-time interfaces. |
-| Express | REST request routing and middleware composition. | Routes/controllers hand validated work to application/domain services; they do not hold core business logic. |
-| MongoDB | Persistent data store. | Stores application records; tenant scoping and invariants must be enforced by backend access patterns and appropriate database constraints. |
-| Mongoose | Backend persistence mapping and model-level validation support. | Does not replace authorization, domain validation, or concurrency-safe operation design. |
-| Socket.IO | Bidirectional real-time transport for queue updates. | Authenticated/validated subscriptions and privacy-safe events; not a source of truth for persisted state. |
+| Technology     | Architectural responsibility                                                                                                                                        | Boundary                                                                                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| React          | Renders the browser user interface and composes reusable screens and components.                                                                                    | Does not make authoritative authorization, availability, or queue decisions.                                                                                                            |
+| Vite           | Development server and frontend build tooling.                                                                                                                      | Build tooling, not a runtime backend or product service.                                                                                                                                |
+| Tailwind CSS   | Frontend styling system.                                                                                                                                            | Presentation only.                                                                                                                                                                      |
+| Node.js        | Backend runtime for the modular monolith.                                                                                                                           | Hosts the application and real-time interfaces.                                                                                                                                         |
+| Express        | REST request routing and middleware composition.                                                                                                                    | Routes/controllers hand validated work to application/domain services; they do not hold core business logic.                                                                            |
+| MongoDB        | Persistent data store.                                                                                                                                              | Stores application records; tenant scoping and invariants must be enforced by backend access patterns and appropriate database constraints.                                             |
+| Mongoose       | Backend persistence mapping and model-level validation support.                                                                                                     | Does not replace authorization, domain validation, or concurrency-safe operation design.                                                                                                |
+| Socket.IO      | Bidirectional real-time transport for queue updates.                                                                                                                | Authenticated/validated subscriptions and privacy-safe events; not a source of truth for persisted state.                                                                               |
 | JWT and bcrypt | Finalized authentication direction in the project instructions. JWT supports the selected token-based authentication approach; bcrypt is used for password hashing. | Exact token lifecycle, claims, signing-key policy, and account recovery are TBD. Do not treat a token claim as proof of current tenant membership without backend authorization checks. |
-| Zod or Joi | One request-validation library will be selected when implementation begins. | Choice is intentionally deferred; all request data must still be backend validated. |
-| GitHub Actions | CI direction from the project context. | Workflow details and release gates are TBD and are not established by this architecture document. |
+| Zod or Joi     | One request-validation library will be selected when implementation begins.                                                                                         | Choice is intentionally deferred; all request data must still be backend validated.                                                                                                     |
+| GitHub Actions | CI direction from the project context.                                                                                                                              | Workflow details and release gates are TBD and are not established by this architecture document.                                                                                       |
 
 No additional infrastructure or vendor dependency is selected here. Hosting, caching, task queues, notification providers, and observability products remain TBD unless a later requirement justifies them.
 
@@ -97,10 +97,10 @@ The frontend should be organized around application areas and reusable UI, not m
 
 - **Shared application shell:** navigation, identity-aware layout, accessible feedback, and business-context selector where the user has memberships.
 - **Authentication and account:** registration, sign-in, sign-out, and account recovery screens as policies are finalized.
-- **Owner workspace:** onboarding, business profile, feature settings, branches, services, staff, schedules, operational dashboard, analytics, and tenant administration actions.
+- **Owner workspace:** onboarding, business profile, feature settings, branches, services, staff, schedules, queue management, Live Rooms, chronological Activity Log, analytics, and tenant administration actions.
 - **Staff workspace:** assigned appointments and branch queues, with controls limited to the current permissions and assignments.
 - **Customer booking:** branch/service selection, availability presentation, guest or registered-account path, booking confirmation, and applicable cancellation flow.
-- **Customer queue flow:** public QR landing page, queue entry, ticket reference, and the customer's own live status.
+- **Customer queue flow:** public QR landing page, guest-first room selection, ticket reference, the customer's own live status, voluntary queue exit, and optional post-service profile consent.
 - **Platform administration:** registered business listing, tenant activation state, platform usage monitoring, and platform-level analytics, subject to platform permissions.
 
 Frontend responsibilities:
@@ -119,20 +119,20 @@ The frontend must not duplicate business policy as an authority. It may improve 
 
 The following are conceptual boundaries within the one backend application. They are not separately deployed services, and the list does not define implementation folder names or final API routes.
 
-| Module | Responsibilities | Important interactions |
-|---|---|---|
-| Identity and authentication | User identity, credential verification, token/session handling, and authenticated principal construction. | Supplies identity to authorization; exact token lifecycle is TBD. |
-| Platform administration | Platform-scoped business listing and management, activation/suspension, usage monitoring, and platform analytics. | Uses explicit platform permissions; sensitive support access does not follow merely from an administrator role. |
-| Tenant and membership | Business tenant lifecycle, memberships, tenant role assignment, and business-context authorization. | Provides the authoritative tenant scope for other tenant-owned modules. |
-| Feature configuration | Stores/reads supported tenant feature settings and evaluates whether a capability is enabled. | Called by relevant application operations; backend enforcement is mandatory. Initial configurable features are enumerated in SRS BR-005. |
-| Branch and service | Branch profile, IANA timezone, operating hours, service availability, duration and supported settings. | Supplies context to scheduling and queue flows. |
-| Staff and schedule | Staff memberships/assignments and working schedules/exceptions. | Contributes availability and staff-scoped authorization. Exact schedule granularity remains TBD. |
-| Appointment | Availability query, reservation, status changes, cancellation, and rescheduling if included. | Coordinates branch, service, schedule, capacity, customer identity, and feature checks. Capacity model and state policy remain TBD. |
-| Queue | Queue entry, atomic sequence allocation, ticket status, authorized staff operations, and current queue state. | Coordinates branch/service configuration, customer identity, feature checks, audit, and real-time publication. |
-| Customer identity/profile | Customer account identity and customer details associated with bookings or tickets. | A customer account is not a tenant membership; guest identity policy remains TBD. |
-| Analytics | Business-scoped appointment and queue counts and platform-scoped usage analytics. | Enforces business scope for owners and platform scope for administrators; does not grant private data access by default. |
-| Audit | Records significant security, membership, configuration, appointment, queue, and platform administration actions. | Receives structured events from modules; sensitive content and retention are restricted. |
-| Notification coordination (future/conditional) | May coordinate approved external notification delivery. | Provider, channels, consent, and MVP inclusion are TBD; WhatsApp is out of scope. |
+| Module                                         | Responsibilities                                                                                                                                              | Important interactions                                                                                                                                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity and authentication                    | User identity, credential verification, token/session handling, and authenticated principal construction.                                                     | Supplies identity to authorization; exact token lifecycle is TBD.                                                                                                                                                    |
+| Platform administration                        | Platform-scoped business listing and management, activation/suspension, usage monitoring, and platform analytics.                                             | Uses explicit platform permissions; sensitive support access does not follow merely from an administrator role.                                                                                                      |
+| Tenant and membership                          | Business tenant lifecycle, memberships, tenant role assignment, and business-context authorization.                                                           | Provides the authoritative tenant scope for other tenant-owned modules.                                                                                                                                              |
+| Feature configuration                          | Stores/reads supported tenant feature settings and evaluates whether a capability is enabled.                                                                 | Called by relevant application operations; backend enforcement is mandatory. Initial configurable features are enumerated in SRS BR-005.                                                                             |
+| Branch and service                             | Branch profile, IANA timezone, operating hours, service availability, duration and supported settings.                                                        | Supplies context to scheduling and queue flows.                                                                                                                                                                      |
+| Staff and schedule                             | Staff memberships/assignments and working schedules/exceptions.                                                                                               | Contributes availability and staff-scoped authorization. Exact schedule granularity remains TBD.                                                                                                                     |
+| Appointment                                    | Availability query, reservation, status changes, cancellation, and rescheduling if included.                                                                  | Coordinates branch, service, schedule, capacity, customer identity, and feature checks. Capacity model and state policy remain TBD.                                                                                  |
+| Queue                                          | Independent service/room entry, atomic daily sequence allocation, ticket status/history, authorized staff operations, owner monitor, and branch activity log. | Counter scope is tenant/branch/service/local business date in branch timezone. Coordinates feature checks, customer snapshot/profile consent, audit, and real-time publication. Queue transition policy remains TBD. |
+| Customer identity/profile                      | Global customer account identity, minimum anonymous ticket snapshots, and optional tenant-scoped profiles.                                                    | A customer account is not a tenant membership. Anonymous queue entry creates no profile; explicit post-service consent is required.                                                                                  |
+| Analytics                                      | Business-scoped appointment and queue counts and platform-scoped usage analytics.                                                                             | Enforces business scope for owners and platform scope for administrators; does not grant private data access by default.                                                                                             |
+| Audit                                          | Records significant security, membership, configuration, appointment, queue, and platform administration actions.                                             | Receives structured events from modules; sensitive content and retention are restricted.                                                                                                                             |
+| Notification coordination (future/conditional) | May coordinate approved external notification delivery.                                                                                                       | Provider, channels, consent, and MVP inclusion are TBD; WhatsApp is out of scope.                                                                                                                                    |
 
 ### Internal layering
 
@@ -233,7 +233,7 @@ Appointment availability is computed by backend application logic. The frontend 
 
 ### Capacity model remains open
 
-SRS v0.2 deliberately retains three conceptual alternatives:
+SRS v0.3 deliberately retains three conceptual alternatives:
 
 1. **Staff-specific reservations:** a reservation consumes the capacity of an assigned staff member. This makes staff assignment central to conflict checks and may limit flexibility where staff is selected later.
 2. **Service/resource capacity reservations:** a reservation consumes a configured service or resource capacity pool. This may support pooled capacity but requires the business to define those capacities and their scope.
@@ -255,18 +255,18 @@ Branch-local schedules are interpreted using the branch's IANA timezone. Persist
 
 ## 11. Walk-In Queue and Atomic Sequence Allocation
 
-The Queue module owns queue entry and ticket lifecycle operations. At the requirements level, ticket status vocabulary is `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `NO_SHOW`, and `CANCELLED`. This is the initial vocabulary, not a transition table. Allowed transitions, recall, skipping, reopening, and other exceptional transitions remain TBD. Do not assume lifecycle transitions based only on UI actions.
+The Queue module owns queue entry and ticket lifecycle operations. Every queue-enabled service/room at a branch has an independent sequence, scoped by tenant, branch, service, and the business date derived from the branch IANA timezone. A local-date change starts a new daily sequence. The initial ticket status vocabulary is `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `NO_SHOW`, and `CANCELLED`; allowed transitions, recall, skipping, reopening, and other exceptional transitions remain TBD.
 
 ### Join and allocate
 
 1. Resolve the public QR entry point to the intended active business/branch and permitted queue flow.
 2. Check the tenant-controlled queue feature and branch/queue operating availability.
-3. Validate customer input and establish either a registered-customer context or limited guest context.
+3. Validate the required customer display name and selected service/room. Email, phone, and sign-in are optional; an anonymous entrant is represented by a minimal ticket snapshot rather than a profile.
 4. Apply approved duplicate/abuse controls; these details remain TBD.
-5. Allocate the next sequence atomically within the correct branch/queue scope and create the ticket as one consistency-sensitive operation.
+5. Atomically increment the counter for this service and branch-local date, then create a ticket with that service and the sequence. Concurrent first increments must handle duplicate-key upsert races safely.
 6. Return a limited ticket reference and public-safe status only after success.
 
-Concurrent joins must not receive duplicate/conflicting sequence allocation where uniqueness is required. A read-current-number then increment in application memory is not sufficient. A database atomic update, transaction, or other persistence strategy may be used after queue scope, reset cadence, and numbering rules are decided. These policies are not selected by this document.
+Concurrent joins must not receive duplicate sequence allocation within one service and local date. Different services may each issue ticket number 1. A read-current-number then increment in application memory is not sufficient. The counter increment is atomic; counter-plus-ticket failure may leave a gap, and transaction/topology strategy remains a technical decision.
 
 Staff operations must authorize tenant membership and branch/service assignments, validate status changes against the eventual transition model, record relevant actions, and publish real-time updates after the authoritative state change. Ticket history must not be exposed to unrelated customers.
 
@@ -341,7 +341,7 @@ Conceptual operational practices:
 - Make readiness and health reporting suitable to the selected deployment environment without exposing sensitive system details publicly.
 - Define data retention and deletion handling with privacy/legal requirements before launch.
 
-SRS v0.2 sets no numeric performance, availability, recovery, or event-delivery target. Hosting provider, regions, deployment topology, expected tenant load, concurrent sockets, RTO, and RPO remain TBD.
+SRS v0.3 sets no numeric performance, availability, recovery, or event-delivery target. Hosting provider, regions, deployment topology, expected tenant load, concurrent sockets, RTO, and RPO remain TBD.
 
 ## 16. Development, Testing, and Deployment Environment Architecture
 
@@ -370,36 +370,37 @@ No cloud provider, container strategy, number of backend instances, load balance
 
 ## 17. Architecture Decisions and Trade-offs
 
-| Decision | Rationale | Trade-off / implication |
-|---|---|---|
-| Modular monolith backend | Keeps related booking, queue, tenant, and membership rules close and supports a clear initial deployment. | Requires disciplined module boundaries; one backend release affects the whole backend. |
-| React/Vite frontend separated from Express backend | Allows a browser-focused user interface and a backend-owned policy boundary. | Requires explicit API contracts later; frontend and backend changes must remain compatible. |
-| MongoDB with Mongoose | Matches the finalized product stack and supports flexible domain data through a familiar Node.js integration. | Correctness still depends on explicit indexes, atomic operations, and transaction capabilities; schema and topology are future work. |
-| Membership-based tenant authorization | Supports users having different roles in different businesses and avoids global-role leakage. | Every protected operation and data access path must verify membership and tenant scope. |
-| Backend-enforced tenant features | Prevents UI state from becoming the authority for business capabilities. | Feature checks must be consistently applied across REST, socket, and asynchronous paths. |
-| REST for application operations; Socket.IO for live updates | REST provides request/response operations and authoritative refresh; sockets improve queue responsiveness. | Event delivery is not guaranteed to be a durable source of truth; clients need reconnect/refetch behavior. |
-| UTC instants plus branch IANA timezone | Provides consistent storage while preserving correct branch-local scheduling semantics. | Timezone transitions and local-time ambiguity must be handled explicitly in detailed scheduling design. |
-| Hashed sensitive public tokens | Limits impact if token storage is exposed and reduces raw secret exposure. | The system must define token lookup, rotation, expiry, recovery, and verification flows before implementation. |
-| Keep hosting and integrations undecided | Avoids vendor-specific complexity before scale and operational needs are known. | Deployment and production readiness planning remains incomplete until those choices are made. |
+| Decision                                                    | Rationale                                                                                                     | Trade-off / implication                                                                                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Modular monolith backend                                    | Keeps related booking, queue, tenant, and membership rules close and supports a clear initial deployment.     | Requires disciplined module boundaries; one backend release affects the whole backend.                                               |
+| React/Vite frontend separated from Express backend          | Allows a browser-focused user interface and a backend-owned policy boundary.                                  | Requires explicit API contracts later; frontend and backend changes must remain compatible.                                          |
+| MongoDB with Mongoose                                       | Matches the finalized product stack and supports flexible domain data through a familiar Node.js integration. | Correctness still depends on explicit indexes, atomic operations, and transaction capabilities; schema and topology are future work. |
+| Membership-based tenant authorization                       | Supports users having different roles in different businesses and avoids global-role leakage.                 | Every protected operation and data access path must verify membership and tenant scope.                                              |
+| Backend-enforced tenant features                            | Prevents UI state from becoming the authority for business capabilities.                                      | Feature checks must be consistently applied across REST, socket, and asynchronous paths.                                             |
+| REST for application operations; Socket.IO for live updates | REST provides request/response operations and authoritative refresh; sockets improve queue responsiveness.    | Event delivery is not guaranteed to be a durable source of truth; clients need reconnect/refetch behavior.                           |
+| UTC instants plus branch IANA timezone                      | Provides consistent storage while preserving correct branch-local scheduling semantics.                       | Timezone transitions and local-time ambiguity must be handled explicitly in detailed scheduling design.                              |
+| Hashed sensitive public tokens                              | Limits impact if token storage is exposed and reduces raw secret exposure.                                    | The system must define token lookup, rotation, expiry, recovery, and verification flows before implementation.                       |
+| Keep hosting and integrations undecided                     | Avoids vendor-specific complexity before scale and operational needs are known.                               | Deployment and production readiness planning remains incomplete until those choices are made.                                        |
 
 ## 18. Unresolved Decisions and Their Architectural Impact
 
-The following decisions remain open in SRS v0.2. They must be resolved by the product owner or stakeholders before affected detailed design is finalized.
+The following decisions remain open in SRS v0.3. They must be resolved by the product owner or stakeholders before affected detailed design is finalized.
 
-| Unresolved decision | Architectural impact if left open |
-|---|---|
-| Appointment capacity: staff-specific, service/resource-based, or hybrid | Determines availability query model, conflict identity, required assignments, concurrency strategy, and likely indexes. Keep capacity checks behind a scheduling boundary until selected. |
-| Appointment states that consume capacity | Determines when capacity is held or released, how cancellation/no-show works, and which transitions need atomic updates. Do not encode assumptions in status handling. |
-| Appointment lifecycle and allowed transitions | Determines validation, audit events, customer/staff actions, cancellation/rescheduling, and availability updates. |
-| Queue transitions, recall, skip, reopening, and exceptional transitions | Determines permitted queue service actions, status guards, and event semantics. Initial status vocabulary is fixed in SRS, but no transition graph is selected here. |
-| Guest verification and public token lifecycle | Determines public access scope, token expiry/rotation/revocation, account recovery, rate limits, and customer status retrieval. |
-| Notification providers and channels | Determines provider adapters, consent, retries, delivery monitoring, secret management, and failure behavior. Not required to select for this conceptual architecture. |
-| Detailed role-to-action permissions | Determines authorization rules and UI action visibility; platform and tenant permission scopes must remain separate regardless. |
-| Deployment provider, hosting topology, scale and numerical performance targets | Determines instance count, Socket.IO distribution, database topology, monitoring, capacity planning, backup, recovery, and release gates. No performance SLA is invented here. |
-| MongoDB topology and concurrency facilities | Determines availability of transactions and deployment-specific atomicity choices for booking and queue sequencing. Must be evaluated during database design. |
-| Branch-local time edge cases and schedule granularity | Determines availability calculations, DST handling, exception representation, and time display behavior. UTC storage and IANA branch timezone remain fixed. |
-| Feature setting granularity and entitlement policy | Determines whether effective settings are business-wide or branch-specific and how supported settings interact. Backend validation remains mandatory. |
-| Audit access and retention; privacy jurisdictions | Determines permitted data visibility, retention/deletion behavior, support access controls, and launch obligations. Sensitive platform support access must be explicitly approved. |
-| Socket.IO room/event contracts and delivery guarantees | Determines event payloads, replay/refetch behavior, cross-instance distribution, and load planning. Authorization and privacy-safe payloads remain mandatory independent of these choices. |
+| Unresolved decision                                                            | Architectural impact if left open                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Appointment capacity: staff-specific, service/resource-based, or hybrid        | Determines availability query model, conflict identity, required assignments, concurrency strategy, and likely indexes. Keep capacity checks behind a scheduling boundary until selected.                            |
+| Appointment states that consume capacity                                       | Determines when capacity is held or released, how cancellation/no-show works, and which transitions need atomic updates. Do not encode assumptions in status handling.                                               |
+| Appointment lifecycle and allowed transitions                                  | Determines validation, audit events, customer/staff actions, cancellation/rescheduling, and availability updates.                                                                                                    |
+| Queue transitions, recall, skip, reopening, and exceptional transitions        | Determines permitted queue service actions, status guards, and event semantics. Initial status vocabulary is fixed in SRS, but no transition graph is selected here.                                                 |
+| Guest verification and public token lifecycle                                  | Determines whether higher-assurance identity checks are needed, and token rotation/revocation beyond the current seven-day queue status credential; account recovery and rate-limit details remain policy decisions. |
+| Notification providers and channels                                            | Determines provider adapters, consent, retries, delivery monitoring, secret management, and failure behavior. Not required to select for this conceptual architecture.                                               |
+| Detailed role-to-action permissions                                            | Determines authorization rules and UI action visibility; platform and tenant permission scopes must remain separate regardless.                                                                                      |
+| Deployment provider, hosting topology, scale and numerical performance targets | Determines instance count, Socket.IO distribution, database topology, monitoring, capacity planning, backup, recovery, and release gates. No performance SLA is invented here.                                       |
+| MongoDB topology and concurrency facilities                                    | Determines transaction use for multi-document booking/queue writes; single-document queue counter increments remain atomic. Must be evaluated during deployment/database design.                                     |
+| Queue status transitions beyond current operating flow                         | Determines recall, skip, reopen, exceptional transitions, and exact actor permissions. The six initial statuses and current core flow do not settle these extensions.                                                |
+| Branch-local time edge cases and schedule granularity                          | Determines availability calculations, DST handling, exception representation, and time display behavior. UTC storage and IANA branch timezone remain fixed.                                                          |
+| Feature setting granularity and entitlement policy                             | Determines whether effective settings are business-wide or branch-specific and how supported settings interact. Backend validation remains mandatory.                                                                |
+| Audit access and retention; privacy jurisdictions                              | Determines permitted data visibility, retention/deletion behavior, support access controls, and launch obligations. Sensitive platform support access must be explicitly approved.                                   |
+| Socket.IO room/event contracts and delivery guarantees                         | Determines event payloads, replay/refetch behavior, cross-instance distribution, and load planning. Authorization and privacy-safe payloads remain mandatory independent of these choices.                           |
 
 Until these decisions are made, implementation should use only approved requirements, preserve safe boundaries, and avoid creating behavior that implies a product policy.

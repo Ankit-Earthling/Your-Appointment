@@ -19,6 +19,8 @@ const ownerNavigation = [
     items: [
       ['appointments', 'Appointments'],
       ['queue', 'Queue Management'],
+      ['live-rooms', 'Live Rooms'],
+      ['queue-activity', 'Activity Log'],
       ['customers', 'Customers'],
     ],
   },
@@ -250,6 +252,119 @@ export function LandingPage({ user }) {
             </p>
           </div>
         </div>
+      </section>
+    </main>
+  );
+}
+
+export function PublicQueueTicket() {
+  const { ticketId } = useParams();
+  const [ticket, setTicket] = useState(null),
+    [error, setError] = useState(''),
+    [profileSaved, setProfileSaved] = useState(false),
+    [declined, setDeclined] = useState(false),
+    [consent, setConsent] = useState(false);
+  const token = decodeURIComponent(window.location.hash.slice(1));
+  const refresh = useCallback(async () => {
+    try {
+      const result = await api(`/public/queue-tickets/${ticketId}`, {
+        headers: { 'X-Public-Access-Token': token },
+      });
+      setTicket(result.ticket);
+      setError('');
+    } catch (e) {
+      setError(e.message);
+    }
+  }, [ticketId, token]);
+  useEffect(() => {
+    if (token) refresh();
+  }, [refresh, token]);
+  useEffect(() => {
+    if (!token) return;
+    const socket = io(API.replace('/api/v1', ''), {
+      path: '/api/socket.io',
+      auth: { publicAccessToken: token },
+    });
+    socket.on('ticket.updated', refresh);
+    return () => socket.disconnect();
+  }, [token, refresh]);
+  async function leave() {
+    try {
+      await api(`/public/queue-tickets/${ticketId}/leave`, {
+        method: 'PATCH',
+        headers: { 'X-Public-Access-Token': token },
+      });
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function saveProfile(event) {
+    event.preventDefault();
+    try {
+      await api(`/public/queue-tickets/${ticketId}/profile`, {
+        method: 'POST',
+        headers: { 'X-Public-Access-Token': token },
+        body: jsonBody({ consent: true }),
+      });
+      setProfileSaved(true);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  return (
+    <main className="min-h-screen bg-slate-50 px-4 py-12">
+      <section className="surface mx-auto max-w-xl p-7 sm:p-9">
+        <p className="text-xs font-bold uppercase tracking-[.16em] text-indigo-700">
+          Private queue ticket
+        </p>
+        <h1 className="mt-2 text-3xl font-semibold">
+          {ticket?.service?.name ?? 'Your room queue'}
+        </h1>
+        <Alert>{error || (!token ? 'This secure link is missing its access token.' : '')}</Alert>
+        {ticket && (
+          <div className="mt-6 rounded-2xl bg-indigo-50 p-6">
+            <p className="text-4xl font-semibold">
+              {ticket.service?.name ?? 'Room'} · #{ticket.sequenceNumber}
+            </p>
+            <p className="mt-3">
+              <span className={statusClass(ticket.status)}>{ticket.status}</span>
+            </p>
+            <p className="mt-3 text-sm">
+              {ticket.branch?.name} · {ticket.peopleAhead} people ahead
+            </p>
+            <p className="mt-2 text-sm text-slate-600">
+              Joined {dateTime(ticket.joinedAt, ticket.branch?.timezone)}
+            </p>
+            {['WAITING', 'CALLED'].includes(ticket.status) && (
+              <button className="button-danger mt-4" onClick={leave}>
+                Leave queue
+              </button>
+            )}
+          </div>
+        )}
+        {ticket?.status === 'COMPLETED' && !profileSaved && !declined && (
+          <form className="mt-6 grid gap-3" onSubmit={saveProfile}>
+            <p className="font-semibold">Save my details with this business for future visits.</p>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                required
+                checked={consent}
+                onChange={(event) => setConsent(event.target.checked)}
+              />
+              <span>I agree to save my visit details as a business-specific customer profile.</span>
+            </label>
+            <div className="flex gap-2">
+              <PrimaryButton disabled={!consent}>Save my details</PrimaryButton>
+              <button type="button" className="button-secondary" onClick={() => setDeclined(true)}>
+                No thanks
+              </button>
+            </div>
+          </form>
+        )}
+        {profileSaved && <p className="mt-4 text-sm text-emerald-800">Your profile was saved.</p>}
+        {declined && <p className="mt-4 text-sm text-slate-600">No profile was created.</p>}
       </section>
     </main>
   );
@@ -946,6 +1061,10 @@ function OwnerPage({ section, data, reloadBusinessMemberships, session }) {
       return <AppointmentsPage data={data} role="owner" />;
     case 'queue':
       return <QueueManagementPage data={data} role="owner" />;
+    case 'live-rooms':
+      return <RoomMonitorPage data={data} />;
+    case 'queue-activity':
+      return <QueueActivityPage data={data} />;
     case 'customers':
       return <CustomersPage businessId={data.businessId} />;
     case 'staff':
@@ -1233,6 +1352,16 @@ function AppointmentsPage({ data, role }) {
 function QueueManagementPage({ data, role }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [serviceId, setServiceId] = useState('');
+  const services = data.services.filter(
+    (service) =>
+      service.queueEnabled &&
+      (!data.branchId || service.branchIds.some((id) => String(id) === String(data.branchId))),
+  );
+  useEffect(() => {
+    if (!services.some((service) => String(service.id) === String(serviceId)))
+      setServiceId(services[0]?.id ?? '');
+  }, [data.branchId, data.services, serviceId]);
   useEffect(() => {
     if (!data.branchId) return;
     const socket = io(API.replace('/api/v1', ''), {
@@ -1240,9 +1369,11 @@ function QueueManagementPage({ data, role }) {
       path: '/api/socket.io',
     });
     socket.emit('tenant:join', { businessId: data.businessId, branchId: data.branchId });
-    socket.on('queue.updated', () => data.refresh());
+    socket.on('queue.updated', (event) => {
+      if (!event?.serviceId || String(event.serviceId) === String(serviceId)) data.refresh();
+    });
     return () => socket.disconnect();
-  }, [data.businessId, data.branchId]);
+  }, [data.businessId, data.branchId, serviceId]);
   async function callNext() {
     if (!data.branchId) return;
     setBusy(true);
@@ -1250,7 +1381,7 @@ function QueueManagementPage({ data, role }) {
     try {
       await api(`/businesses/${data.businessId}/branches/${data.branchId}/queue/call-next`, {
         method: 'POST',
-        body: '{}',
+        body: jsonBody({ serviceId }),
       });
       await data.refresh();
     } catch (e) {
@@ -1281,31 +1412,68 @@ function QueueManagementPage({ data, role }) {
         title={role === 'owner' ? 'Queue Management' : 'My Queue'}
         description="Call the next waiting ticket and record service progress. Customer updates are delivered to their private ticket room."
         action={
-          <Select
-            label="Branch"
-            value={data.branchId || ''}
-            onChange={(e) => data.setBranchId(e.target.value)}
-          >
-            <option value="">Choose branch</option>
-            {data.branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </Select>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Select
+              label="Branch"
+              value={data.branchId || ''}
+              onChange={(e) => data.setBranchId(e.target.value)}
+            >
+              <option value="">Choose branch</option>
+              {data.branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              label="Room / service queue"
+              value={serviceId}
+              onChange={(e) => setServiceId(e.target.value)}
+            >
+              <option value="">Choose room</option>
+              {services.map((service) => (
+                <option key={service.id} value={service.id}>
+                  {service.name}
+                </option>
+              ))}
+            </Select>
+          </div>
         }
       />
       <Alert>{error || data.error}</Alert>
       <div className="surface p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Today’s tickets</h2>
-          <PrimaryButton disabled={!data.branchId || busy} onClick={callNext}>
+          <p className="text-sm font-semibold text-indigo-800">
+            Selected room:{' '}
+            {services.find((item) => String(item.id) === String(serviceId))?.name ??
+              'Choose a room'}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Assigned staff:{' '}
+            {data.assignments
+              .filter(
+                (assignment) =>
+                  assignment.status === 'active' &&
+                  String(assignment.branchId) === String(data.branchId) &&
+                  (assignment.serviceIds.length === 0 ||
+                    assignment.serviceIds.some((id) => String(id) === String(serviceId))),
+              )
+              .map((assignment) => assignment.user?.displayName ?? 'Staff')
+              .join(', ') || 'No staff assigned'}
+          </p>
+          <PrimaryButton disabled={!data.branchId || !serviceId || busy} onClick={callNext}>
             Call next waiting ticket
           </PrimaryButton>
         </div>
         {data.tickets.length ? (
           <div className="divide-y divide-slate-100">
-            {[...data.tickets]
+            {data.tickets
+              .filter(
+                (ticket) =>
+                  String(ticket.serviceId?._id ?? ticket.serviceId) === String(serviceId) &&
+                  String(ticket.branchId?._id ?? ticket.branchId) === String(data.branchId),
+              )
               .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
               .map((ticket) => (
                 <div
@@ -1313,7 +1481,15 @@ function QueueManagementPage({ data, role }) {
                   className="flex flex-wrap items-center justify-between gap-3 py-4"
                 >
                   <div>
-                    <p className="font-semibold">Ticket #{ticket.sequenceNumber}</p>
+                    <p className="font-semibold">
+                      {ticket.serviceId?.name ??
+                        services.find((item) => String(item.id) === String(serviceId))?.name ??
+                        'Room'}{' '}
+                      · Ticket #{ticket.sequenceNumber}
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      {ticket.customerSnapshot?.displayName ?? 'Customer'}
+                    </p>
                     <p className="mt-1 text-xs text-slate-500">
                       {ticket.localDate} · {ticket._id}
                     </p>
@@ -1330,16 +1506,32 @@ function QueueManagementPage({ data, role }) {
                         Complete
                       </PrimaryButton>
                     )}
-                    {['WAITING', 'CALLED'].includes(ticket.status) && (
+                    {ticket.status === 'WAITING' && (
                       <button
                         className="button-danger"
                         disabled={busy}
-                        onClick={() =>
-                          setStatus(ticket, ticket.status === 'WAITING' ? 'CANCELLED' : 'NO_SHOW')
-                        }
+                        onClick={() => setStatus(ticket, 'CANCELLED')}
                       >
-                        {ticket.status === 'WAITING' ? 'Cancel' : 'No-show'}
+                        Cancel
                       </button>
+                    )}
+                    {ticket.status === 'CALLED' && (
+                      <>
+                        <button
+                          className="button-danger"
+                          disabled={busy}
+                          onClick={() => setStatus(ticket, 'NO_SHOW')}
+                        >
+                          No-show
+                        </button>
+                        <button
+                          className="button-danger"
+                          disabled={busy}
+                          onClick={() => setStatus(ticket, 'CANCELLED')}
+                        >
+                          Cancel
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1347,11 +1539,244 @@ function QueueManagementPage({ data, role }) {
           </div>
         ) : (
           <EmptyState
-            title="The queue is clear"
-            description="New guest tickets will appear here. Customers can join through the branch QR link."
+            title={serviceId ? 'This room queue is clear' : 'Choose a room'}
+            description="Only this room’s tickets appear here. Customers can join through the branch QR link."
           />
         )}
       </div>
+    </>
+  );
+}
+
+function RoomMonitorPage({ data }) {
+  const [monitor, setMonitor] = useState(null),
+    [error, setError] = useState(''),
+    [now, setNow] = useState(Date.now());
+  const refresh = useCallback(async () => {
+    if (!data.branchId) return;
+    try {
+      setMonitor(
+        await api(`/businesses/${data.businessId}/branches/${data.branchId}/queue-monitor`),
+      );
+      setError('');
+    } catch (e) {
+      setError(e.message);
+    }
+  }, [data.businessId, data.branchId]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  useEffect(() => {
+    if (!data.branchId) return;
+    const socket = io(API.replace('/api/v1', ''), {
+      withCredentials: true,
+      path: '/api/socket.io',
+    });
+    socket.emit('tenant:join', { businessId: data.businessId, branchId: data.branchId });
+    socket.on('queue.updated', refresh);
+    socket.on('staff.assignment.updated', refresh);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      clearInterval(timer);
+      socket.disconnect();
+    };
+  }, [data.businessId, data.branchId, refresh]);
+  const branch = data.branches.find((item) => String(item.id) === String(data.branchId));
+  const elapsed = (start, end = now) =>
+    start ? `${Math.max(0, Math.floor((end - new Date(start).getTime()) / 60000))} min` : '—';
+  return (
+    <>
+      <PageHeading
+        title="Live Rooms"
+        description="Live queue state and staff workload for every active room at the selected branch."
+        action={
+          <Select
+            label="Branch"
+            value={data.branchId || ''}
+            onChange={(event) => data.setBranchId(event.target.value)}
+          >
+            <option value="">Choose branch</option>
+            {data.branches.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </Select>
+        }
+      />
+      <Alert>{error || data.error}</Alert>
+      {!data.branchId ? (
+        <EmptyState
+          title="Choose a branch"
+          description="Select a branch to monitor its active rooms."
+        />
+      ) : monitor?.rooms?.length ? (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {monitor.rooms.map((room) => (
+            <article className="surface p-5" key={room.service.id}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">
+                    {room.branch.name}
+                  </p>
+                  <h2 className="mt-1 text-xl font-semibold">{room.service.name}</h2>
+                </div>
+                <span className={statusClass(room.state === 'IDLE' ? 'CANCELLED' : room.state)}>
+                  {room.state}
+                </span>
+              </div>
+              <p className="mt-4 text-sm text-slate-600">
+                Waiting: <strong>{room.waitingCount}</strong>
+              </p>
+              {room.current ? (
+                <div className="mt-4 rounded-xl bg-slate-50 p-4">
+                  <p className="text-2xl font-semibold">
+                    {room.service.name} · #{room.current.sequenceNumber}
+                  </p>
+                  <p className="mt-1">{room.current.displayName}</p>
+                  <p className="text-sm text-slate-600">
+                    Staff: {room.current.servingStaff ?? 'Not assigned yet'}
+                  </p>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Joined {dateTime(room.current.joinedAt, branch?.timezone)} · Waiting{' '}
+                    {elapsed(
+                      room.current.joinedAt,
+                      room.current.calledAt ? new Date(room.current.calledAt) : now,
+                    )}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Called{' '}
+                    {room.current.calledAt
+                      ? dateTime(room.current.calledAt, branch?.timezone)
+                      : '—'}{' '}
+                    · Started{' '}
+                    {room.current.serviceStartedAt
+                      ? dateTime(room.current.serviceStartedAt, branch?.timezone)
+                      : '—'}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Service duration {elapsed(room.current.serviceStartedAt)}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+                  No current customer.
+                </p>
+              )}
+              <h3 className="mt-5 text-sm font-semibold">Assigned staff and workload</h3>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {room.assignedStaff.length ? (
+                  room.assignedStaff.map((staff) => (
+                    <span
+                      className="rounded-full bg-indigo-50 px-3 py-1 text-xs text-indigo-900"
+                      key={staff.id}
+                    >
+                      {staff.displayName} · {staff.available ? 'Available' : 'Serving'} ·{' '}
+                      {staff.currentWorkload} active
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-sm text-slate-500">No active staff assignment</span>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          title="No active rooms"
+          description="Active queue-enabled services with an open queue will appear here."
+        />
+      )}
+    </>
+  );
+}
+
+function QueueActivityPage({ data }) {
+  const [result, setResult] = useState(null),
+    [error, setError] = useState('');
+  const load = useCallback(async () => {
+    if (!data.branchId) return;
+    try {
+      setResult(
+        await api(
+          `/businesses/${data.businessId}/queue-activity?branchId=${encodeURIComponent(data.branchId)}`,
+        ),
+      );
+      setError('');
+    } catch (e) {
+      setError(e.message);
+    }
+  }, [data.businessId, data.branchId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  useEffect(() => {
+    if (!data.branchId) return;
+    const socket = io(API.replace('/api/v1', ''), {
+      withCredentials: true,
+      path: '/api/socket.io',
+    });
+    socket.emit('tenant:join', { businessId: data.businessId, branchId: data.branchId });
+    socket.on('queue.updated', load);
+    return () => socket.disconnect();
+  }, [data.businessId, data.branchId, load]);
+  return (
+    <>
+      <PageHeading
+        title="Queue Activity Log"
+        description="Chronological, server-timestamped queue actions for this branch, displayed in its local timezone."
+        action={
+          <Select
+            label="Branch"
+            value={data.branchId || ''}
+            onChange={(event) => data.setBranchId(event.target.value)}
+          >
+            <option value="">Choose branch</option>
+            {data.branches.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </Select>
+        }
+      />
+      <Alert>{error || data.error}</Alert>
+      {result?.entries?.length ? (
+        <div className="surface overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date and time</th>
+                <th>Room</th>
+                <th>Ticket / customer</th>
+                <th>Action</th>
+                <th>Staff</th>
+                <th>Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.entries.map((entry, index) => (
+                <tr key={`${entry.at}-${entry.sequenceNumber}-${index}`}>
+                  <td>{dateTime(entry.at, result.branch.timezone)}</td>
+                  <td>{entry.service}</td>
+                  <td>
+                    #{entry.sequenceNumber} · {entry.customer}
+                  </td>
+                  <td>{entry.action}</td>
+                  <td>{entry.staff ?? 'Customer / system'}</td>
+                  <td>{entry.durationMinutes != null ? `${entry.durationMinutes} min` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyState
+          title={data.branchId ? 'No queue activity yet' : 'Choose a branch'}
+          description="Recorded queue events will appear here."
+        />
+      )}
     </>
   );
 }
@@ -1504,7 +1929,7 @@ function StaffManagementPage({ data }) {
           </div>
         </fieldset>
         <div className="md:col-span-2">
-          <PrimaryButton disabled={busy || !branchId}>
+          <PrimaryButton disabled={busy || !branchId || !serviceIds.length}>
             {busy ? 'Saving…' : 'Add or update staff assignment'}
           </PrimaryButton>
         </div>
@@ -1517,6 +1942,7 @@ function StaffManagementPage({ data }) {
               <th>Branch</th>
               <th>Services</th>
               <th>Booked appointments</th>
+              <th>Actions</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -1541,6 +1967,29 @@ function StaffManagementPage({ data }) {
                         appointment.status === 'BOOKED',
                     ).length
                   }
+                </td>
+                <td>
+                  <button
+                    className="button-secondary"
+                    onClick={async () => {
+                      try {
+                        await api(
+                          `/businesses/${data.businessId}/staff-assignments/${assignment.id}`,
+                          {
+                            method: 'PATCH',
+                            body: jsonBody({
+                              status: assignment.status === 'active' ? 'inactive' : 'active',
+                            }),
+                          },
+                        );
+                        await data.refresh();
+                      } catch (e) {
+                        setError(e.message);
+                      }
+                    }}
+                  >
+                    {assignment.status === 'active' ? 'Deactivate' : 'Reactivate'}
+                  </button>
                 </td>
                 <td>
                   <span
@@ -1694,6 +2143,20 @@ function ServicesPage({ data }) {
                   .join(', ')}
               </p>
               <p className="mt-1 text-xs text-slate-500">{service.status}</p>
+              <p className="mt-2 text-sm text-slate-600">
+                <span className="font-medium">Assigned staff:</span>{' '}
+                {data.assignments
+                  .filter(
+                    (assignment) =>
+                      assignment.status === 'active' &&
+                      assignment.serviceIds.some((id) => String(id) === String(service.id)),
+                  )
+                  .map(
+                    (assignment) =>
+                      assignment.user?.displayName ?? assignment.user?.email ?? 'Staff',
+                  )
+                  .join(', ') || 'None assigned'}
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -2255,7 +2718,13 @@ function StaffOverview({ data }) {
                 key={t._id}
                 className="flex items-center justify-between border-b border-slate-100 py-3"
               >
-                <span>Ticket #{t.sequenceNumber}</span>
+                <span>
+                  {t.serviceId?.name ??
+                    data.services.find((service) => String(service.id) === String(t.serviceId))
+                      ?.name ??
+                    'Room'}{' '}
+                  · Ticket #{t.sequenceNumber}
+                </span>
                 <span className={statusClass(t.status)}>{t.status}</span>
               </div>
             ))
@@ -2839,6 +3308,10 @@ export function QueueEntry() {
     [serviceId, setServiceId] = useState(''),
     [displayName, setDisplayName] = useState(''),
     [email, setEmail] = useState(''),
+    [phone, setPhone] = useState(''),
+    [profileSaved, setProfileSaved] = useState(false),
+    [profileDeclined, setProfileDeclined] = useState(false),
+    [profileConsent, setProfileConsent] = useState(false),
     [ticket, setTicket] = useState(null),
     [token, setToken] = useState(''),
     [error, setError] = useState(''),
@@ -2857,7 +3330,18 @@ export function QueueEntry() {
       path: '/api/socket.io',
       auth: { publicAccessToken: token },
     });
-    socket.on('ticket.updated', (update) => setTicket((current) => ({ ...current, ...update })));
+    const refreshTicket = async (update) => {
+      setTicket((current) => ({ ...current, ...update }));
+      try {
+        const result = await api(`/public/queue-tickets/${ticket.id}`, {
+          headers: { 'X-Public-Access-Token': token },
+        });
+        setTicket((current) => ({ ...current, ...result.ticket }));
+      } catch {
+        /* Keep the last received status visible during transient network errors. */
+      }
+    };
+    socket.on('ticket.updated', refreshTicket);
     return () => socket.disconnect();
   }, [ticket?.id, token]);
   async function join(event) {
@@ -2867,15 +3351,54 @@ export function QueueEntry() {
     try {
       const result = await api(`/public/branches/${context.branch.id}/queue-tickets`, {
         method: 'POST',
-        body: jsonBody({ serviceId, displayName, email: email || undefined }),
+        body: jsonBody({
+          serviceId,
+          displayName,
+          email: email || undefined,
+          phone: phone || undefined,
+        }),
       });
       sessionStorage.setItem(`ticket:${result.ticket.id}`, result.accessToken);
-      setTicket(result.ticket);
+      setTicket({
+        ...result.ticket,
+        service: result.service,
+        branch: result.branch,
+        joinedAt: result.joinedAt,
+      });
       setToken(result.accessToken);
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
+    }
+  }
+  async function leaveQueue() {
+    try {
+      await api(`/public/queue-tickets/${ticket.id}/leave`, {
+        method: 'PATCH',
+        headers: { 'X-Public-Access-Token': token },
+      });
+      setTicket((current) => ({ ...current, status: 'CANCELLED' }));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function saveProfile(event) {
+    event.preventDefault();
+    try {
+      await api(`/public/queue-tickets/${ticket.id}/profile`, {
+        method: 'POST',
+        headers: { 'X-Public-Access-Token': token },
+        body: jsonBody({
+          consent: true,
+          displayName: displayName || undefined,
+          email: email || undefined,
+          phone: phone || undefined,
+        }),
+      });
+      setProfileSaved(true);
+    } catch (e) {
+      setError(e.message);
     }
   }
   return (
@@ -2891,7 +3414,7 @@ export function QueueEntry() {
           {context?.branch.name ?? 'Join this branch’s queue'}
         </h1>
         <p className="mt-2 text-sm text-slate-600">
-          Enter your details to receive a private ticket and live status updates.
+          Join as a guest with your name. Contact details and sign-in are optional.
         </p>
         <Alert>{error}</Alert>
         {error && (
@@ -2902,29 +3425,106 @@ export function QueueEntry() {
         {ticket ? (
           <div className="mt-7 rounded-2xl bg-indigo-50 p-6">
             <p className="text-sm font-semibold text-indigo-800">Your ticket</p>
-            <p className="mt-2 text-4xl font-semibold text-slate-950">#{ticket.sequenceNumber}</p>
+            <p className="mt-2 text-4xl font-semibold text-slate-950">
+              {ticket.service?.name ??
+                context?.services.find((item) => item.id === serviceId)?.name ??
+                'Room'}{' '}
+              · #{ticket.sequenceNumber}
+            </p>
             <p className="mt-3">
               <span className={statusClass(ticket.status)}>{ticket.status}</span>
             </p>
             <p className="mt-3 text-sm text-slate-600">
-              Keep this page open to receive queue updates.
+              {ticket.branch?.name ?? context?.branch.name} · Joined{' '}
+              {ticket.joinedAt
+                ? dateTime(ticket.joinedAt, ticket.branch?.timezone ?? context?.branch.timezone)
+                : 'just now'}
+              . Keep this page open for updates.
             </p>
+            {['WAITING', 'CALLED'].includes(ticket.status) && (
+              <button type="button" className="button-danger mt-4" onClick={leaveQueue}>
+                Leave queue
+              </button>
+            )}
+            {ticket.status === 'COMPLETED' && !profileSaved && !profileDeclined && (
+              <form className="mt-5 border-t border-indigo-100 pt-4" onSubmit={saveProfile}>
+                <p className="text-sm font-semibold">
+                  Save my details with this business for future visits.
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  This is optional. Your queue ticket does not create a customer profile unless you
+                  opt in.
+                </p>
+                <label className="mt-3 flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    required
+                    checked={profileConsent}
+                    onChange={(event) => setProfileConsent(event.target.checked)}
+                  />
+                  <span>
+                    I agree to save my visit details as a business-specific customer profile.
+                  </span>
+                </label>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <PrimaryButton disabled={!profileConsent}>Save my details</PrimaryButton>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => setProfileDeclined(true)}
+                  >
+                    No thanks
+                  </button>
+                </div>
+              </form>
+            )}
+            {profileSaved && (
+              <p className="mt-4 text-sm text-emerald-800">
+                Your details were saved with this business.
+              </p>
+            )}
+            {profileDeclined && (
+              <p className="mt-4 text-sm text-slate-600">
+                You declined profile saving. Your queue visit is complete.
+              </p>
+            )}
+            <button
+              className="button-secondary mt-4"
+              type="button"
+              onClick={async () => {
+                const url = `${window.location.origin}/queue/ticket/${ticket.id}#${encodeURIComponent(token)}`;
+                try {
+                  await navigator.clipboard.writeText(url);
+                  setError('Secure ticket link copied.');
+                } catch {
+                  window.prompt('Copy your secure ticket link', url);
+                }
+              }}
+            >
+              Copy secure ticket link
+            </button>
           </div>
         ) : (
           <form className="mt-7 grid gap-4" onSubmit={join}>
-            <Select
-              label="Service"
-              value={serviceId}
-              onChange={(e) => setServiceId(e.target.value)}
-              required
-            >
-              <option value="">Choose a service</option>
-              {context?.services.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </Select>
+            {context?.services.length === 1 ? (
+              <p className="rounded-xl bg-slate-50 p-3 text-sm">
+                <span className="font-semibold">Room / service:</span> {context.services[0].name}
+              </p>
+            ) : (
+              <Select
+                label="Service"
+                value={serviceId}
+                onChange={(e) => setServiceId(e.target.value)}
+                required
+              >
+                <option value="">Choose a service</option>
+                {context?.services.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </Select>
+            )}
             <Input
               label="Your name"
               value={displayName}
@@ -2937,6 +3537,12 @@ export function QueueEntry() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+            />
+            <Input
+              label="Phone (optional)"
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
             />
             <PrimaryButton disabled={!context || busy}>
               {busy ? 'Joining…' : 'Join queue'}

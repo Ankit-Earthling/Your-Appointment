@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { Server as SocketServer } from 'socket.io';
 import { setIo } from './lib/socket.js';
 import { verifySession, SESSION_COOKIE } from './lib/security.js';
-import { User, Membership, StaffAssignment } from './models/index.js';
+import { User, Membership, StaffAssignment, Branch, Service } from './models/index.js';
 import { PublicAccessToken } from './models/index.js';
 import { hashToken } from './lib/security.js';
 
@@ -67,6 +67,7 @@ export async function startServer({
       const user = await User.findById(claims.sub).select('_id');
       if (!user) return next(new Error('authentication required'));
       socket.data.userId = String(user._id);
+      socket.join(`user:${user._id}`);
       next();
     } catch {
       next(new Error('authentication required'));
@@ -75,6 +76,13 @@ export async function startServer({
   io.on('connection', (socket) => {
     if (socket.data.publicTicketId) socket.join(`queue-ticket:${socket.data.publicTicketId}`);
     socket.on('tenant:join', async ({ businessId, branchId } = {}) => {
+      if (!businessId || !branchId) return;
+      const branch = await Branch.findOne({
+        _id: branchId,
+        tenantId: businessId,
+        status: 'active',
+      });
+      if (!branch) return;
       const membership = await Membership.findOne({
         tenantId: businessId,
         userId: socket.data.userId,
@@ -89,7 +97,20 @@ export async function startServer({
         membershipId: membership._id,
         status: 'active',
       });
-      if (assignment) socket.join(`tenant:${businessId}:branch:${branchId}`);
+      if (assignment) {
+        const serviceIds = assignment.serviceIds.length
+          ? assignment.serviceIds
+          : (
+              await Service.find({
+                tenantId: businessId,
+                branchIds: branchId,
+                status: 'active',
+                queueEnabled: true,
+              }).select('_id')
+            ).map((service) => service._id);
+        for (const serviceId of serviceIds)
+          socket.join(`tenant:${businessId}:branch:${branchId}:service:${serviceId}`);
+      }
     });
   });
   await new Promise((resolveListen, rejectListen) => {

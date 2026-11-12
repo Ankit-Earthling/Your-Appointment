@@ -1,15 +1,15 @@
 # API Specification — Your Appointment
 
-| Document attribute | Value |
-|---|---|
-| Status | Proposed API contract for review |
-| Requirements baseline | SRS version 0.2 |
-| Architecture baseline | Architecture version 0.1 |
-| Database baseline | Database design version 0.1 |
-| Version | 0.1 |
-| Last updated | 2026-11-11 |
+| Document attribute    | Value                            |
+| --------------------- | -------------------------------- |
+| Status                | Proposed API contract for review |
+| Requirements baseline | SRS version 0.3                  |
+| Architecture baseline | Architecture version 0.1         |
+| Database baseline     | Database design version 0.2      |
+| Version               | 0.2                              |
+| Last updated          | 2026-11-12                       |
 
-This document proposes REST and Socket.IO contracts for implementation planning. It is subordinate to [SRS.md](SRS.md), [architecture.md](architecture.md), and [database-design.md](database-design.md). Route names and payloads are proposed contracts; they do not finalize product policies marked TBD in those baselines. No application code, route implementation, or database schema is defined here.
+This document describes the REST and Socket.IO contracts for implementation planning. It is subordinate to [SRS.md](SRS.md), [architecture.md](architecture.md), and [database-design.md](database-design.md). Route names and payloads remain a proposed API contract; they do not finalize product policies marked TBD in those baselines. No database schema is defined here.
 
 ## 1. API Overview
 
@@ -27,17 +27,17 @@ Proposed API prefix: **`/api/v1`**. This is a design proposal, not a requirement
 
 ### Conventions
 
-| Topic | Proposed convention |
-|---|---|
-| Content type | JSON request and response bodies use `application/json; charset=utf-8`. QR image/file responses, if offered, use an explicit media type and are not JSON. |
-| Methods | `GET` reads, `POST` creates or invokes a command, `PATCH` partially updates, and `DELETE` is reserved for a later approved hard-delete contract. Prefer explicit action subresources for lifecycle commands. |
-| Identifiers | Opaque string representations of MongoDB ObjectIds in URLs and JSON. A valid identifier is not authorization. |
-| Time | UTC RFC 3339 timestamps with an explicit `Z` or offset, normalized to UTC by the server. Branch-local schedule input is interpreted with the branch's IANA timezone. |
-| Null/omission | Omitted fields mean “not supplied” for PATCH. `null` is accepted only where the field's contract explicitly permits clearing it. |
-| Success body | Resource/operation data is wrapped in `{ "data": ... }`; list pagination information is in `meta`. |
-| Empty success | `204 No Content` has no body. |
+| Topic          | Proposed convention                                                                                                                                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Content type   | JSON request and response bodies use `application/json; charset=utf-8`. QR image/file responses, if offered, use an explicit media type and are not JSON.                                                             |
+| Methods        | `GET` reads, `POST` creates or invokes a command, `PATCH` partially updates, and `DELETE` is reserved for a later approved hard-delete contract. Prefer explicit action subresources for lifecycle commands.          |
+| Identifiers    | Opaque string representations of MongoDB ObjectIds in URLs and JSON. A valid identifier is not authorization.                                                                                                         |
+| Time           | UTC RFC 3339 timestamps with an explicit `Z` or offset, normalized to UTC by the server. Branch-local schedule input is interpreted with the branch's IANA timezone.                                                  |
+| Null/omission  | Omitted fields mean “not supplied” for PATCH. `null` is accepted only where the field's contract explicitly permits clearing it.                                                                                      |
+| Success body   | Resource/operation data is wrapped in `{ "data": ... }`; list pagination information is in `meta`.                                                                                                                    |
+| Empty success  | `204 No Content` has no body.                                                                                                                                                                                         |
 | Tenant context | Tenant routes may include `{businessId}` for routing context. It never proves authorization; the backend resolves and verifies the membership. Public routes resolve tenant from a verified branch/QR/token resource. |
-| Unknown fields | Reject unknown or disallowed fields on write; do not mass-assign request bodies to persistence objects. |
+| Unknown fields | Reject unknown or disallowed fields on write; do not mass-assign request bodies to persistence objects.                                                                                                               |
 
 Examples use fictitious identifiers and omit implementation-only fields. Example status values appear only where approved (queue's six initial statuses); appointment lifecycle values remain placeholders/TBD.
 
@@ -45,15 +45,15 @@ Examples use fictitious identifiers and omit implementation-only fields. Example
 
 ### Proposed endpoints
 
-| Method and route | Purpose | Contract status |
-|---|---|---|
-| `POST /auth/register` | Create a global user account. | Proposed; identifier fields depend on account identity decision. |
-| `POST /auth/login` | Verify credentials and establish authentication. | Proposed; JWT is the approved technology direction, transport/session details TBD. |
-| `POST /auth/logout` | End the caller's session/credential according to the selected token lifecycle. | Proposed; immediate JWT revocation behavior depends on server-side session/revocation policy. |
-| `GET /auth/me` | Return the authenticated user's safe account summary and global platform roles, if any. | Proposed. |
-| `POST /auth/refresh` | Exchange an approved refresh credential for a refreshed session credential. | Conditional on an approved refresh-token/session policy; not required by current SRS. It must not depend on an unexpired access token. |
-| `POST /auth/password-recovery-requests` | Request account recovery. | Should Have / conditional per FR-AUTH-004; channel and policy TBD. |
-| `POST /auth/password-recovery-completions` | Complete an approved recovery challenge. | Conditional on recovery policy and channel. |
+| Method and route                           | Purpose                                                                                 | Contract status                                                                                                                        |
+| ------------------------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /auth/register`                      | Create a global user account.                                                           | Proposed; identifier fields depend on account identity decision.                                                                       |
+| `POST /auth/login`                         | Verify credentials and establish authentication.                                        | Proposed; JWT is the approved technology direction, transport/session details TBD.                                                     |
+| `POST /auth/logout`                        | End the caller's session/credential according to the selected token lifecycle.          | Proposed; immediate JWT revocation behavior depends on server-side session/revocation policy.                                          |
+| `GET /auth/me`                             | Return the authenticated user's safe account summary and global platform roles, if any. | Proposed.                                                                                                                              |
+| `POST /auth/refresh`                       | Exchange an approved refresh credential for a refreshed session credential.             | Conditional on an approved refresh-token/session policy; not required by current SRS. It must not depend on an unexpired access token. |
+| `POST /auth/password-recovery-requests`    | Request account recovery.                                                               | Should Have / conditional per FR-AUTH-004; channel and policy TBD.                                                                     |
+| `POST /auth/password-recovery-completions` | Complete an approved recovery challenge.                                                | Conditional on recovery policy and channel.                                                                                            |
 
 ### Registration and login examples
 
@@ -89,16 +89,16 @@ If cookie transport is selected, require HTTPS, `Secure`, `HttpOnly`, appropriat
 
 ### Endpoints
 
-| Method and route | Purpose | Authentication / authority |
-|---|---|---|
-| `POST /businesses` | Create a tenant and its initial owner membership. | Authenticated user creating a business; onboarding user identity may be created immediately beforehand. |
-| `GET /me/businesses` | List businesses for which the user has active memberships. | Authenticated user; global platform authority is not a substitute for membership in this list. |
-| `GET /businesses/{businessId}` | Read safe business profile and feature state appropriate to caller. | Active tenant membership; exact field visibility by role TBD. |
-| `PATCH /businesses/{businessId}` | Update permitted business profile fields. | Owner membership; field-level authorization TBD. |
-| `PATCH /businesses/{businessId}/feature-settings` | Update supported tenant feature settings. | Owner membership; backend validates allowed keys and effective policy. |
-| `GET /platform/businesses` | List registered businesses for platform operations. | Platform Administrator permission. |
-| `GET /platform/businesses/{businessId}` | View basic platform-level business information/status. | Platform Administrator; no private customer data. |
-| `PATCH /platform/businesses/{businessId}/status` | Activate or suspend a tenant. | Platform Administrator; action audited; suspension effects TBD. |
+| Method and route                                  | Purpose                                                             | Authentication / authority                                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `POST /businesses`                                | Create a tenant and its initial owner membership.                   | Authenticated user creating a business; onboarding user identity may be created immediately beforehand. |
+| `GET /me/businesses`                              | List businesses for which the user has active memberships.          | Authenticated user; global platform authority is not a substitute for membership in this list.          |
+| `GET /businesses/{businessId}`                    | Read safe business profile and feature state appropriate to caller. | Active tenant membership; exact field visibility by role TBD.                                           |
+| `PATCH /businesses/{businessId}`                  | Update permitted business profile fields.                           | Owner membership; field-level authorization TBD.                                                        |
+| `PATCH /businesses/{businessId}/feature-settings` | Update supported tenant feature settings.                           | Owner membership; backend validates allowed keys and effective policy.                                  |
+| `GET /platform/businesses`                        | List registered businesses for platform operations.                 | Platform Administrator permission.                                                                      |
+| `GET /platform/businesses/{businessId}`           | View basic platform-level business information/status.              | Platform Administrator; no private customer data.                                                       |
+| `PATCH /platform/businesses/{businessId}/status`  | Activate or suspend a tenant.                                       | Platform Administrator; action audited; suspension effects TBD.                                         |
 
 ### Onboarding transaction/consistency
 
@@ -140,13 +140,13 @@ Feature settings PATCH accepts only the eight supported keys: `appointments`, `w
 
 ### Proposed endpoints
 
-| Method and route | Purpose | Contract status |
-|---|---|---|
-| `GET /businesses/{businessId}/memberships` | List members in a tenant. | Owner permission; staff visibility TBD. |
-| `GET /businesses/{businessId}/memberships/{membershipId}` | Read one membership. | Owner; self-read may be allowed for member, policy TBD. |
-| `POST /businesses/{businessId}/memberships` | Add an existing user as a tenant member. | Conditional on invitation/member-add policy; never creates a tenant role from customer identity. |
-| `PATCH /businesses/{businessId}/memberships/{membershipId}` | Update allowed tenant roles/assignments. | Owner; exact role matrix TBD. |
-| `PATCH /businesses/{businessId}/memberships/{membershipId}/status` | Activate/deactivate a membership. | Owner; last-owner and effective-session rules TBD. |
+| Method and route                                                   | Purpose                                  | Contract status                                                                                  |
+| ------------------------------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET /businesses/{businessId}/memberships`                         | List members in a tenant.                | Owner permission; staff visibility TBD.                                                          |
+| `GET /businesses/{businessId}/memberships/{membershipId}`          | Read one membership.                     | Owner; self-read may be allowed for member, policy TBD.                                          |
+| `POST /businesses/{businessId}/memberships`                        | Add an existing user as a tenant member. | Conditional on invitation/member-add policy; never creates a tenant role from customer identity. |
+| `PATCH /businesses/{businessId}/memberships/{membershipId}`        | Update allowed tenant roles/assignments. | Owner; exact role matrix TBD.                                                                    |
+| `PATCH /businesses/{businessId}/memberships/{membershipId}/status` | Activate/deactivate a membership.        | Owner; last-owner and effective-session rules TBD.                                               |
 
 Email invitations, invitation acceptance, membership transfer, and detailed invitation lifecycle are not specified as firm behavior; separate invite endpoints are therefore not defined. If approved later, add explicit invite/accept resources rather than treating an email address as an existing user ID.
 
@@ -160,15 +160,15 @@ The backend checks the user exists, the caller may assign the requested role, th
 
 ### Authorization matrix (baseline scope only)
 
-| Operation category | Platform Administrator | Business Owner | Staff Member | Customer / Guest |
-|---|---|---|---|---|
-| Register/login and own account | Own account only; platform role does not grant another user's credential access. | Own account. | Own account. | Own registered account or approved guest flow. |
-| Platform business listing/status and platform analytics | Allowed by explicit platform permission. | No platform scope. | No platform scope. | No platform scope. |
-| Tenant profile/settings/branch/service management | No implicit tenant access. Any exceptional support access is TBD and audited. | Allowed in own tenant, subject to role policy. | Not granted by baseline; exact delegated permissions TBD. | No. |
-| Tenant membership management | No implicit tenant access. | May manage members subject to lifecycle policy. | No baseline authority. | No. |
-| Appointments | No unrestricted customer-data access. | Tenant appointments within authorized business scope. | Assigned operational scope; fine-grained actions TBD. | Create/view/cancel own appointment under policy only. |
-| Queue operations | No private queue access by platform role alone. | Tenant/branch scope. | Assigned branch/service scope; transition policy TBD. | Join and view own limited status only. |
-| Business analytics | No tenant metrics by default; platform analytics only. | Own tenant/authorized branches. | Only if later granted. | No. |
+| Operation category                                      | Platform Administrator                                                           | Business Owner                                        | Staff Member                                              | Customer / Guest                                      |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------- |
+| Register/login and own account                          | Own account only; platform role does not grant another user's credential access. | Own account.                                          | Own account.                                              | Own registered account or approved guest flow.        |
+| Platform business listing/status and platform analytics | Allowed by explicit platform permission.                                         | No platform scope.                                    | No platform scope.                                        | No platform scope.                                    |
+| Tenant profile/settings/branch/service management       | No implicit tenant access. Any exceptional support access is TBD and audited.    | Allowed in own tenant, subject to role policy.        | Not granted by baseline; exact delegated permissions TBD. | No.                                                   |
+| Tenant membership management                            | No implicit tenant access.                                                       | May manage members subject to lifecycle policy.       | No baseline authority.                                    | No.                                                   |
+| Appointments                                            | No unrestricted customer-data access.                                            | Tenant appointments within authorized business scope. | Assigned operational scope; fine-grained actions TBD.     | Create/view/cancel own appointment under policy only. |
+| Queue operations                                        | No private queue access by platform role alone.                                  | Tenant/branch scope.                                  | Assigned branch/service scope; transition policy TBD.     | Join and view own limited status only.                |
+| Business analytics                                      | No tenant metrics by default; platform analytics only.                           | Own tenant/authorized branches.                       | Only if later granted.                                    | No.                                                   |
 
 This is not a finalized detailed permission matrix. SRS leaves exact role-to-action permissions TBD. Every business route containing `{businessId}` must resolve an active membership for the authenticated user and confirm required role/branch/service scope. A customer account is not required to have a membership in a business where they book. A guest has no general tenant permission.
 
@@ -176,14 +176,14 @@ This is not a finalized detailed permission matrix. SRS leaves exact role-to-act
 
 Proposed resource endpoints:
 
-| Method and route | Purpose | Required inputs / behavior | Authority |
-|---|---|---|---|
-| `POST /businesses/{businessId}/branches` | Create branch. | Name, timezone (IANA), required address fields TBD, optional operating hours. | Owner membership. |
-| `GET /businesses/{businessId}/branches` | List tenant branches. | Pagination/filtering per Section 16. | Owner; staff sees only assigned branches. Customer booking uses the contextual public endpoint below. |
-| `GET /businesses/{businessId}/branches/{branchId}` | Read branch. | Branch must belong to business. | Owner or assigned staff. Public customers use the contextual public endpoint below. |
-| `PATCH /businesses/{businessId}/branches/{branchId}` | Update branch profile. | Allowlisted mutable fields; no tenantId reassignment. | Owner membership. |
-| `PATCH /businesses/{businessId}/branches/{branchId}/operating-hours` | Update hours/timezone. | Proposed body contains IANA timezone and local recurring hours; exact schedule model TBD. | Owner membership. |
-| `PATCH /businesses/{businessId}/branches/{branchId}/status` | Activate/deactivate. | `status` enum proposal `active`/`inactive`; effects on existing bookings/queues TBD. | Owner membership. |
+| Method and route                                                     | Purpose                | Required inputs / behavior                                                                | Authority                                                                                             |
+| -------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `POST /businesses/{businessId}/branches`                             | Create branch.         | Name, timezone (IANA), required address fields TBD, optional operating hours.             | Owner membership.                                                                                     |
+| `GET /businesses/{businessId}/branches`                              | List tenant branches.  | Pagination/filtering per Section 16.                                                      | Owner; staff sees only assigned branches. Customer booking uses the contextual public endpoint below. |
+| `GET /businesses/{businessId}/branches/{branchId}`                   | Read branch.           | Branch must belong to business.                                                           | Owner or assigned staff. Public customers use the contextual public endpoint below.                   |
+| `PATCH /businesses/{businessId}/branches/{branchId}`                 | Update branch profile. | Allowlisted mutable fields; no tenantId reassignment.                                     | Owner membership.                                                                                     |
+| `PATCH /businesses/{businessId}/branches/{branchId}/operating-hours` | Update hours/timezone. | Proposed body contains IANA timezone and local recurring hours; exact schedule model TBD. | Owner membership.                                                                                     |
+| `PATCH /businesses/{businessId}/branches/{branchId}/status`          | Activate/deactivate.   | `status` enum proposal `active`/`inactive`; effects on existing bookings/queues TBD.      | Owner membership.                                                                                     |
 
 Every branch ID is resolved under the authorized business. Timezone is validated as an IANA identifier. Schedules are branch-local, while appointment instants are UTC. No route accepts a client-provided `tenantId` as authority. Branch deactivation must not silently delete or rewrite historical appointment/queue records.
 
@@ -194,7 +194,12 @@ The SRS supports customer selection/resolution of an active branch, and its book
 ```json
 {
   "data": [
-    { "id": "66b400000000000000000001", "name": "Northside - Main", "addressSummary": "Pune", "timezone": "Asia/Kolkata" }
+    {
+      "id": "66b400000000000000000001",
+      "name": "Northside - Main",
+      "addressSummary": "Pune",
+      "timezone": "Asia/Kolkata"
+    }
   ],
   "meta": { "nextCursor": null, "limit": 25 }
 }
@@ -217,14 +222,14 @@ On successful create, return `201` with the new branch's safe fields. On update,
 
 ## 6. Service Management
 
-| Method and route | Purpose | Required inputs / behavior | Authority |
-|---|---|---|---|
-| `POST /businesses/{businessId}/services` | Create service. | Name, appointment/queue capability, duration if bookable, eligible branch references. | Owner membership. |
-| `GET /businesses/{businessId}/services` | List tenant services. | Optional branch/status filters; only same-tenant branches. | Owner or assigned staff as allowed. Public customers use the contextual endpoint below. |
-| `GET /businesses/{businessId}/services/{serviceId}` | Read service. | Service must belong to tenant. | Tenant role as allowed. |
-| `PATCH /businesses/{businessId}/services/{serviceId}` | Update service configuration. | Allowlisted fields; do not accept `tenantId`. | Owner membership. |
-| `PUT /businesses/{businessId}/services/{serviceId}/branches` | Replace eligible branch associations. | Branch ID list validated in tenant; endpoint form is a proposal. | Owner membership. |
-| `PATCH /businesses/{businessId}/services/{serviceId}/status` | Activate/deactivate. | Existing records remain historical; deactivation effect on future work TBD. | Owner membership. |
+| Method and route                                             | Purpose                               | Required inputs / behavior                                                            | Authority                                                                               |
+| ------------------------------------------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `POST /businesses/{businessId}/services`                     | Create service.                       | Name, appointment/queue capability, duration if bookable, eligible branch references. | Owner membership.                                                                       |
+| `GET /businesses/{businessId}/services`                      | List tenant services.                 | Optional branch/status filters; only same-tenant branches.                            | Owner or assigned staff as allowed. Public customers use the contextual endpoint below. |
+| `GET /businesses/{businessId}/services/{serviceId}`          | Read service.                         | Service must belong to tenant.                                                        | Tenant role as allowed.                                                                 |
+| `PATCH /businesses/{businessId}/services/{serviceId}`        | Update service configuration.         | Allowlisted fields; do not accept `tenantId`.                                         | Owner membership.                                                                       |
+| `PUT /businesses/{businessId}/services/{serviceId}/branches` | Replace eligible branch associations. | Branch ID list validated in tenant; endpoint form is a proposal.                      | Owner membership.                                                                       |
+| `PATCH /businesses/{businessId}/services/{serviceId}/status` | Activate/deactivate.                  | Existing records remain historical; deactivation effect on future work TBD.           | Owner membership.                                                                       |
 
 Service capability flags and tenant-level feature settings are both checked. A service marked queue-capable cannot bypass `walkInQueue=false`; likewise appointments require the tenant appointment setting. Duration and buffer constraints, branch-specific service overrides, and behavior when `serviceSelection` is disabled remain TBD.
 
@@ -234,9 +239,7 @@ Example response for `flow=appointments`:
 
 ```json
 {
-  "data": [
-    { "id": "66b500000000000000000001", "name": "General consultation" }
-  ],
+  "data": [{ "id": "66b500000000000000000001", "name": "General consultation" }],
   "meta": { "nextCursor": null, "limit": 25 }
 }
 ```
@@ -257,21 +260,20 @@ The response is `201` with a safe service resource. The backend rejects a branch
 
 ## 7. Staff Management
 
-| Method and route | Purpose | Required inputs / behavior | Authority |
-|---|---|---|---|
-| `GET /businesses/{businessId}/staff-assignments` | List tenant staff assignments. | Branch/service filters are optional and authorized. | Owner; staff may view self/assigned scope per policy. |
-| `POST /businesses/{businessId}/staff-assignments` | Create assignment for a user membership. | `membershipId`, `branchId`, optional `serviceIds`, optional working hours. All references same tenant. | Owner membership; invite flow TBD. |
-| `GET /businesses/{businessId}/staff-assignments/{assignmentId}` | Read assignment. | Resolve under tenant. | Owner or assigned staff as allowed. |
-| `PATCH /businesses/{businessId}/staff-assignments/{assignmentId}` | Update branch/service assignment or schedule. | Allowlisted fields only; validate membership/branch/services same tenant. | Owner membership. |
-| `PATCH /businesses/{businessId}/staff-assignments/{assignmentId}/status` | Deactivate/reactivate assignment. | Does not erase audit or historical work; effects on booked appointments TBD. | Owner membership. |
+| Method and route                                                  | Purpose                                       | Required inputs / behavior                                                                                                       | Authority                                             |
+| ----------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `GET /businesses/{businessId}/staff-assignments`                  | List tenant staff assignments.                | Branch/service filters are optional and authorized.                                                                              | Owner; staff may view self/assigned scope per policy. |
+| `POST /businesses/{businessId}/staff-assignments`                 | Create assignment for an existing staff user. | Staff account email, `branchId`, and one or more `serviceIds`; optional working hours. All references resolve inside the tenant. | Owner membership; invite flow TBD.                    |
+| `GET /businesses/{businessId}/staff-assignments/{assignmentId}`   | Read assignment.                              | Resolve under tenant.                                                                                                            | Owner or assigned staff as allowed.                   |
+| `PATCH /businesses/{businessId}/staff-assignments/{assignmentId}` | Update service assignment or active status.   | Allowlisted `serviceIds` and/or `status` (`active`/`inactive`); validate services belong to the assignment tenant and branch.    | Owner membership.                                     |
 
-Working schedules and exceptions use branch-local time and the branch IANA timezone. Exact schedule granularity and owner/staff permission details remain TBD. The backend verifies that `membershipId` is an active staff relationship; a global `userId` alone cannot be assigned tenant permissions.
+Working schedules and exceptions use branch-local time and the branch IANA timezone. Exact schedule granularity and owner/staff permission details remain TBD. The backend resolves the supplied staff account to an active staff membership in the same tenant; a global `userId` alone cannot establish tenant permissions. Multiple staff assignments may reference the same service, and one staff member may be assigned to multiple services.
 
 Example create body:
 
 ```json
 {
-  "membershipId": "66b300000000000000000002",
+  "email": "staff@example.test",
   "branchId": "66b400000000000000000001",
   "serviceIds": ["66b500000000000000000001"],
   "workingHours": [{ "dayOfWeek": 1, "startsLocal": "09:00", "endsLocal": "17:00" }]
@@ -294,15 +296,15 @@ The response is `201` with the safe assignment fields. A cross-tenant membership
 
 ### Endpoint contracts
 
-| Method and route | Auth and authorization | Parameters/body | Success | Important errors |
-|---|---|---|---|---|
-| `GET /public/branches/{branchId}/availability` | Public read; optional authenticated customer context. Public branch/service data only. | Query: `serviceId` required (obtained from the contextual service list when service selection is enabled), `from` and `to` UTC instants required; optional `staffAssignmentId` only when staff selection is enabled. | `200` list of candidate `{startAt,endAt,timezone}` slots; no private reservation data. | `400 VALIDATION_ERROR`, `403 FEATURE_DISABLED`, `404 RESOURCE_NOT_FOUND`, `429 RATE_LIMITED`. |
-| `POST /public/branches/{branchId}/appointments` | Public customer operation; optional valid customer authentication. Backend derives tenant from branch. | JSON: `serviceId`, `startAt`, optional eligible `staffAssignmentId`, and guest contact only when using guest flow. Authenticated user identity comes from credential, never body. | `201` safe appointment confirmation after reservation commits. | `400`, `401` if auth supplied but invalid, `403 FEATURE_DISABLED/FORBIDDEN`, `404`, `409 APPOINTMENT_CAPACITY_CONFLICT`, `422 INVALID_RELATIONSHIP`, `429`. |
-| `GET /appointments/{appointmentId}` | Owner/staff with tenant scope, authenticated customer who owns it, or approved guest status credential. | Path appointment ID; guest credential in approved header/cookie, never an unprotected arbitrary ID lookup. | `200` caller-appropriate appointment view. | `401`, `403`, privacy-safe `404`, `429`. |
-| `GET /businesses/{businessId}/appointments` | Owner; staff only within assigned branch/service scope. | Query: optional `branchId`, `from`, `to`, `status` only after lifecycle values are approved; standard pagination. | `200` tenant-scoped appointment list. | `400`, `401`, `403`, `404`, `422` invalid branch/relationship. |
-| `POST /appointments/{appointmentId}/cancellations` | Customer owner/approved guest or authorized owner/staff. | Optional approved cancellation reason; actor derives from credential. Cancellation window and reason rules TBD. | `200` updated appointment view after commit. | `401`, `403`, `404`, `409 APPOINTMENT_STATE_CONFLICT`, `422 CANCELLATION_NOT_ALLOWED`, `429`. |
-| `POST /appointments/{appointmentId}/reschedules` | Customer owner/approved guest or authorized business user. | `startAt` UTC and optional staff selection per feature. | Proposed `200` updated/new linked appointment only if rescheduling behavior is approved. | `409 APPOINTMENT_CAPACITY_CONFLICT`, `409 APPOINTMENT_STATE_CONFLICT`, `422 VALIDATION_ERROR`. Contract is conditional. |
-| `PATCH /businesses/{businessId}/appointments/{appointmentId}` | Owner or staff with assigned scope. | Allowlisted operational fields only. Arbitrary status writes are prohibited. Exact status/actions TBD. | `200` safe updated view for approved changes. | `401`, `403`, `404`, `409 APPOINTMENT_STATE_CONFLICT`, `422 VALIDATION_ERROR`. |
+| Method and route                                              | Auth and authorization                                                                                  | Parameters/body                                                                                                                                                                                                      | Success                                                                                  | Important errors                                                                                                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /public/branches/{branchId}/availability`                | Public read; optional authenticated customer context. Public branch/service data only.                  | Query: `serviceId` required (obtained from the contextual service list when service selection is enabled), `from` and `to` UTC instants required; optional `staffAssignmentId` only when staff selection is enabled. | `200` list of candidate `{startAt,endAt,timezone}` slots; no private reservation data.   | `400 VALIDATION_ERROR`, `403 FEATURE_DISABLED`, `404 RESOURCE_NOT_FOUND`, `429 RATE_LIMITED`.                                                               |
+| `POST /public/branches/{branchId}/appointments`               | Public customer operation; optional valid customer authentication. Backend derives tenant from branch.  | JSON: `serviceId`, `startAt`, optional eligible `staffAssignmentId`, and guest contact only when using guest flow. Authenticated user identity comes from credential, never body.                                    | `201` safe appointment confirmation after reservation commits.                           | `400`, `401` if auth supplied but invalid, `403 FEATURE_DISABLED/FORBIDDEN`, `404`, `409 APPOINTMENT_CAPACITY_CONFLICT`, `422 INVALID_RELATIONSHIP`, `429`. |
+| `GET /appointments/{appointmentId}`                           | Owner/staff with tenant scope, authenticated customer who owns it, or approved guest status credential. | Path appointment ID; guest credential in approved header/cookie, never an unprotected arbitrary ID lookup.                                                                                                           | `200` caller-appropriate appointment view.                                               | `401`, `403`, privacy-safe `404`, `429`.                                                                                                                    |
+| `GET /businesses/{businessId}/appointments`                   | Owner; staff only within assigned branch/service scope.                                                 | Query: optional `branchId`, `from`, `to`, `status` only after lifecycle values are approved; standard pagination.                                                                                                    | `200` tenant-scoped appointment list.                                                    | `400`, `401`, `403`, `404`, `422` invalid branch/relationship.                                                                                              |
+| `POST /appointments/{appointmentId}/cancellations`            | Customer owner/approved guest or authorized owner/staff.                                                | Optional approved cancellation reason; actor derives from credential. Cancellation window and reason rules TBD.                                                                                                      | `200` updated appointment view after commit.                                             | `401`, `403`, `404`, `409 APPOINTMENT_STATE_CONFLICT`, `422 CANCELLATION_NOT_ALLOWED`, `429`.                                                               |
+| `POST /appointments/{appointmentId}/reschedules`              | Customer owner/approved guest or authorized business user.                                              | `startAt` UTC and optional staff selection per feature.                                                                                                                                                              | Proposed `200` updated/new linked appointment only if rescheduling behavior is approved. | `409 APPOINTMENT_CAPACITY_CONFLICT`, `409 APPOINTMENT_STATE_CONFLICT`, `422 VALIDATION_ERROR`. Contract is conditional.                                     |
+| `PATCH /businesses/{businessId}/appointments/{appointmentId}` | Owner or staff with assigned scope.                                                                     | Allowlisted operational fields only. Arbitrary status writes are prohibited. Exact status/actions TBD.                                                                                                               | `200` safe updated view for approved changes.                                            | `401`, `403`, `404`, `409 APPOINTMENT_STATE_CONFLICT`, `422 VALIDATION_ERROR`.                                                                              |
 
 An unavailable/stale candidate slot returns `409 APPOINTMENT_CAPACITY_CONFLICT`; it must not look like a booking succeeded. An overlap check uses interval semantics, not equality of start times. An ordinary unique index is not the concurrency guarantee. The detailed atomic reservation strategy depends on capacity policy and MongoDB topology.
 
@@ -314,9 +316,7 @@ An unavailable/stale candidate slot returns `409 APPOINTMENT_CAPACITY_CONFLICT`;
     "branchId": "66b400000000000000000001",
     "serviceId": "66b500000000000000000001",
     "timezone": "Asia/Kolkata",
-    "slots": [
-      { "startAt": "2026-11-12T04:30:00Z", "endAt": "2026-11-12T05:15:00Z" }
-    ]
+    "slots": [{ "startAt": "2026-11-12T04:30:00Z", "endAt": "2026-11-12T05:15:00Z" }]
   }
 }
 ```
@@ -337,52 +337,51 @@ For an authenticated customer, omit `guest`; backend attaches the authenticated 
 
 ### Endpoints
 
-| Method and route | Purpose | Auth/authority | Contract status |
-|---|---|---|---|
-| `GET /public/qr/{qrCredential}` | Resolve branch QR entry information. | Public, rate-limited; credential only identifies permitted public entry flow. | Proposed route; QR token format/rotation unresolved. Redact credential from logs. |
-| `GET /public/branches/{branchId}/queue-entry` | Retrieve public-safe queue options if QR resolution uses a non-secret branch identifier. | Public; returns only active/public options. | Alternative to QR credential route; exact approach TBD. |
-| `POST /public/branches/{branchId}/queue-tickets` | Join the eligible queue. | Public guest or optionally authenticated customer; backend resolves tenant from branch and checks feature. | Proposed. |
-| `GET /public/queue-tickets/{ticketId}` | Retrieve one ticket's limited status. | Requires approved ticket access token in a protected header or authenticated ownership. | Proposed; guest verification/token delivery TBD. |
-| `GET /me/queue-tickets` | List authenticated customer's own tickets. | Authenticated customer; no tenant membership required. | Proposed. |
-| `GET /businesses/{businessId}/queue-configurations/{queueId}/tickets` | List operational queue tickets. | Owner or staff within branch/service assignment. | Proposed; exact queue scope TBD. |
-| `POST /businesses/{businessId}/queue-tickets/{ticketId}/calls` | Call a ticket. | Authorized staff/owner. | Conditional on approved transition graph. |
-| `POST /businesses/{businessId}/queue-tickets/{ticketId}/service-starts` | Mark service started. | Authorized staff/owner. | Conditional; proposed transition to `SERVING`, not final until approved. |
-| `POST /businesses/{businessId}/queue-tickets/{ticketId}/completions` | Complete a ticket. | Authorized staff/owner. | Conditional on allowed transition. |
-| `POST /businesses/{businessId}/queue-tickets/{ticketId}/no-shows` | Mark no-show. | Authorized staff/owner. | Conditional on allowed transition. |
-| `POST /businesses/{businessId}/queue-tickets/{ticketId}/cancellations` | Cancel ticket. | Customer for own ticket or authorized staff/owner, per policy. | Conditional; actor permissions and transition TBD. |
-| `POST /businesses/{businessId}/queue-tickets/{ticketId}/recalls` | Recall previously called ticket. | Authorized staff/owner. | Conditional; FR-QUEUE-009 policy requires further specification. |
-| `POST /businesses/{businessId}/queue-tickets/{ticketId}/skips` | Skip a ticket. | Authorized staff/owner. | Conditional; no transition is approved by this proposed route. |
+| Method and route                                                        | Purpose                                                                | Auth/authority                                                                                                                | Contract status                                                                                                                |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /public/qr/{qrCredential}`                                         | Resolve branch QR entry information.                                   | Public, rate-limited; credential only identifies permitted public entry flow.                                                 | Proposed route; QR token format/rotation unresolved. Redact credential from logs.                                              |
+| `POST /public/branches/{branchId}/queue-tickets`                        | Join the selected service/room queue.                                  | Public guest or optionally authenticated customer; tenant resolves from active branch; queue feature and service are checked. | Name and service required; email, phone, and sign-in optional.                                                                 |
+| `GET /public/queue-tickets/{ticketId}`                                  | Retrieve one ticket's limited status and progress.                     | Requires `X-Public-Access-Token` scoped to this ticket.                                                                       | Does not return name, contact, or internal staff details.                                                                      |
+| `PATCH /public/queue-tickets/{ticketId}/leave`                          | Voluntarily leave an eligible queue.                                   | Requires the ticket's public access token.                                                                                    | Changes eligible ticket to `CANCELLED`; server timestamps the event.                                                           |
+| `POST /public/queue-tickets/{ticketId}/profile`                         | Explicitly save a business-scoped profile after service.               | Requires ticket access token and completed ticket.                                                                            | Body: `{ "consent": true, "displayName"?, "email"?, "phone"? }`; profile reuse only for same-tenant verified matching contact. |
+| `GET /me/queue-tickets`                                                 | List authenticated customer's own tickets.                             | Authenticated customer; no tenant membership required.                                                                        | Proposed.                                                                                                                      |
+| `GET /businesses/{businessId}/queue-tickets?branchId=...&serviceId=...` | List operational tickets, filtered to the selected branch and service. | Owner or staff within active branch/service assignments.                                                                      | Owner/staff response may contain customer display snapshot; public routes may not.                                             |
+| `POST /businesses/{businessId}/branches/{branchId}/queue/call-next`     | Atomically call the next waiting ticket for exactly one service.       | Owner or staff assigned to branch and service.                                                                                | Body requires `serviceId`; concurrent call cannot claim the same ticket twice.                                                 |
+| `PATCH /businesses/{businessId}/queue-tickets/{ticketId}`               | Apply a currently supported ticket status action.                      | Owner or staff assigned to that ticket's branch and service.                                                                  | Body status; conditional atomic update records actor/time. See transition note below.                                          |
+| `GET /businesses/{businessId}/branches/{branchId}/queue-monitor`        | Read per-room current status, waiting counts, staff, and workload.     | Owner only; same-tenant active branch.                                                                                        | Public-safe output is not used; owner data remains tenant-scoped.                                                              |
+| `GET /businesses/{businessId}/queue-activity?branchId=...`              | Read chronological branch queue event history.                         | Owner only.                                                                                                                   | Events displayed in branch timezone; actor/time/status history retained.                                                       |
 
 ### Join request and concurrency
 
-Proposed request:
+Request:
 
 ```json
 {
-  "queueConfigurationId": "66b900000000000000000001",
   "serviceId": "66b500000000000000000001",
-  "guest": { "displayName": "Maya Rao", "phone": "+10000000000" }
+  "displayName": "Maya Rao",
+  "email": "maya@example.test",
+  "phone": "+10000000000"
 }
 ```
 
-Queue configuration/service references are optional/required according to the queue-scope decision. The backend verifies that branch, config, and service are in the same tenant and that queue feature and branch operation are enabled. Authenticated customer identity comes from the credential; `customerUserId` is never trusted from body input.
+`serviceId` and `displayName` are required; `email` and `phone` are optional. `customerUserId`, `tenantId`, branch, and queue configuration are never trusted from body input. The backend resolves tenant from branch, validates the service's branch relationship, active status, queue capability and tenant feature, and selects the matching open queue configuration. If only one service is available the UI may select it directly without a redundant chooser.
 
-Success is `201 Created` after atomic sequence allocation and ticket creation according to the approved consistency strategy. The initial response contains a safe ticket identifier, sequence display, `WAITING` status, joined time, and public-safe status URL where supported. It must not expose other customers' details. Whether a one-time guest credential must be delivered to the customer is unresolved; the API must not return a raw token or token hash in an ordinary response. If an approved flow requires delivery of a bearer credential, its one-time delivery contract needs explicit approval and controls.
+Success is `201 Created` after the service-specific branch-local daily sequence is allocated. Response includes the ticket ID, sequence number, `WAITING`, service/room and branch display context, `joinedAt`, and raw high-entropy ticket access token once for the customer status flow. Store only its hash. The UI may place the one-time credential in a URL fragment (not query/path) so it is not sent in HTTP requests or routine server logs, then transmit it in `X-Public-Access-Token` or the Socket.IO auth handshake. This access link is limited to its ticket; the ticket API returns no customer name, contact details, or internal staff identity.
 
-Sequence allocation is scoped by queue configuration, but branch-only, service-specific, and configurable queue scope are alternatives. Duplicate retries can create duplicate tickets unless idempotency is specified; no idempotency policy is finalized. A unique sequence index and atomic counter are proposed by the database design, while counter-plus-ticket atomicity depends on MongoDB topology/transaction availability. Sequence gaps, reset and numbering policies remain TBD.
+The sequence counter is keyed by tenant, queue configuration (one per branch/service), and `localDate`, derived using the branch IANA timezone. Each service starts at #1 for each local date; another service may also issue #1. Atomic increments prevent conflicting numbers. A duplicate-key race on first counter upsert retries the increment on the existing counter. Counter increment and ticket insert are separate writes and may leave a gap if ticket creation fails; transactions depend on MongoDB topology.
 
-Transition-specific command endpoints above are **proposed route shapes only**. They must not be implemented as allowed transitions until the queue lifecycle policy is approved. Initial ticket status vocabulary remains `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `NO_SHOW`, `CANCELLED`; this document defines no transition graph.
+Current application actions are: call-next moves the earliest `WAITING` ticket to `CALLED`; staff may move `CALLED` to `SERVING`, `NO_SHOW`, `CANCELLED`, and `SERVING` to `COMPLETED`; eligible customer leave moves `WAITING` or `CALLED` to `CANCELLED`. These are limited core operations needed for the implemented workflow. Recall, skip, reopen, and exceptional transitions are not exposed. The product's complete transition policy and actor permissions remain TBD; the initial vocabulary is exactly `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `NO_SHOW`, `CANCELLED`.
 
 ## 10. Customer APIs
 
-| Method and route | Purpose | Auth/authority | Notes |
-|---|---|---|---|
-| `GET /me/appointments` | List authenticated customer's appointments across businesses where they booked. | Authenticated customer identity; no tenant membership required. | Return only own records; filtering/pagination Section 16. |
-| `GET /appointments/{appointmentId}` | View own appointment. | Authenticated ownership or approved guest credential. | Same resource route may support tenant staff/owner view after separate authorization. |
-| `GET /me/queue-tickets` | List authenticated customer's own tickets. | Authenticated customer; no tenant membership required. | Return only caller's records. |
-| `GET /queue-tickets/{ticketId}` | View own ticket. | Authenticated ownership or approved guest token. | Privacy-safe fields only. |
-| `GET /me/customer-profile` | Read customer account profile. | Authenticated customer. | Conditional: profile API only if account-profile feature/fields are approved. |
-| `PATCH /me/customer-profile` | Update own customer profile fields. | Authenticated customer. | Could Have in SRS; exact fields and `customerAccounts` semantics TBD. |
+| Method and route                    | Purpose                                                                         | Auth/authority                                                  | Notes                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `GET /me/appointments`              | List authenticated customer's appointments across businesses where they booked. | Authenticated customer identity; no tenant membership required. | Return only own records; filtering/pagination Section 16.                             |
+| `GET /appointments/{appointmentId}` | View own appointment.                                                           | Authenticated ownership or approved guest credential.           | Same resource route may support tenant staff/owner view after separate authorization. |
+| `GET /me/queue-tickets`             | List authenticated customer's own tickets.                                      | Authenticated customer; no tenant membership required.          | Return only caller's records.                                                         |
+| `GET /queue-tickets/{ticketId}`     | View own ticket.                                                                | Authenticated ownership or approved guest token.                | Privacy-safe fields only.                                                             |
+| `GET /me/customer-profile`          | Read customer account profile.                                                  | Authenticated customer.                                         | Conditional: profile API only if account-profile feature/fields are approved.         |
+| `PATCH /me/customer-profile`        | Update own customer profile fields.                                             | Authenticated customer.                                         | Could Have in SRS; exact fields and `customerAccounts` semantics TBD.                 |
 
 Customer account identity is global; it does not require membership in every business where the customer books. The backend determines ownership from authenticated identity and linked records, not a submitted customer/user ID. Guest access uses only an approved limited public mechanism; arbitrary appointment/ticket IDs alone never grant access. No endpoint returns another customer's contact information.
 
@@ -390,13 +389,13 @@ Customer account identity is global; it does not require membership in every bus
 
 QR entry resolution can use `GET /public/qr/{qrCredential}` as a proposed opaque route or a public branch route if the product chooses a non-secret locator. The token architecture requires secure, hash-only persistence for sensitive credentials, but QR credential format, guest verification, expiry, reuse, revocation, and rotation remain TBD.
 
-| Method and route | Purpose | Authority / safeguards |
-|---|---|---|
-| `GET /public/qr/{qrCredential}` | Resolve QR to public branch/queue choices. | Rate-limited; credential is redacted from logs and must reveal no private records. |
-| `POST /public/branches/{branchId}/queue-tickets` | Public queue join. | Validates queue feature, branch/service relation, input, abuse controls, and sequence allocation. |
-| `GET /public/queue-tickets/{ticketId}` | Public-safe own ticket status. | Requires approved bearer token/header or verified guest mechanism; resource ID alone insufficient. |
-| `POST /businesses/{businessId}/branches/{branchId}/queue-qr-rotations` | Rotate QR credential/representation. | Conditional on FR-QR-003 token policy; owner only; audit action. |
-| `POST /businesses/{businessId}/public-access-tokens/{tokenId}/revocations` | Revoke a token. | Conditional lifecycle operation; owner authority and token purpose checked. |
+| Method and route                                                           | Purpose                                    | Authority / safeguards                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `GET /public/qr/{qrCredential}`                                            | Resolve QR to public branch/queue choices. | Rate-limited; credential is redacted from logs and must reveal no private records.                 |
+| `POST /public/branches/{branchId}/queue-tickets`                           | Public queue join.                         | Validates queue feature, branch/service relation, input, abuse controls, and sequence allocation.  |
+| `GET /public/queue-tickets/{ticketId}`                                     | Public-safe own ticket status.             | Requires approved bearer token/header or verified guest mechanism; resource ID alone insufficient. |
+| `POST /businesses/{businessId}/branches/{branchId}/queue-qr-rotations`     | Rotate QR credential/representation.       | Conditional on FR-QR-003 token policy; owner only; audit action.                                   |
+| `POST /businesses/{businessId}/public-access-tokens/{tokenId}/revocations` | Revoke a token.                            | Conditional lifecycle operation; owner authority and token purpose checked.                        |
 
 Token records store only `tokenHash`; no endpoint returns the hash. Raw public credentials are sensitive. The ordinary resource response, event, logs, and error body must not expose them. An intentional QR artifact or one-time customer credential may need to carry a bearer secret to its intended recipient; the exact delivery route is unresolved and must be explicitly approved rather than smuggled into generic responses. Expiry/revocation is enforced at access time; TTL cleanup is not authorization.
 
@@ -406,12 +405,12 @@ Apply rate limits to QR resolution, queue join, token status lookup, login, and 
 
 Platform operations are separate from tenant operations. Platform Administrator can use platform-scoped operations for registered business listing/basic business information, tenant activation/suspension, usage monitoring, and platform analytics. This role does not automatically grant unrestricted access to tenant appointments, customer profiles, contact data, queue details, or membership records.
 
-| Method and route | Purpose | Required authority | Response boundary |
-|---|---|---|---|
-| `GET /platform/businesses` | List businesses, status, and approved basic account fields. | Platform Administrator. | No customer records/private tenant operational detail. |
-| `GET /platform/businesses/{businessId}` | View basic business information. | Platform Administrator. | Only platform-safe information; support data access is TBD. |
-| `PATCH /platform/businesses/{businessId}/status` | Activate/suspend business. | Platform Administrator. | Audit actor/time; suspension effects TBD. |
-| `GET /platform/analytics/usage` | View approved aggregate platform usage measures. | Platform Administrator. | No unrestricted private tenant/customer data; metrics and date semantics TBD. |
+| Method and route                                 | Purpose                                                     | Required authority      | Response boundary                                                             |
+| ------------------------------------------------ | ----------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------- |
+| `GET /platform/businesses`                       | List businesses, status, and approved basic account fields. | Platform Administrator. | No customer records/private tenant operational detail.                        |
+| `GET /platform/businesses/{businessId}`          | View basic business information.                            | Platform Administrator. | Only platform-safe information; support data access is TBD.                   |
+| `PATCH /platform/businesses/{businessId}/status` | Activate/suspend business.                                  | Platform Administrator. | Audit actor/time; suspension effects TBD.                                     |
+| `GET /platform/analytics/usage`                  | View approved aggregate platform usage measures.            | Platform Administrator. | No unrestricted private tenant/customer data; metrics and date semantics TBD. |
 
 Sensitive support access, tenant data inspection, impersonation, approval workflows, and fine-grained platform permissions remain TBD. Such access needs a separate explicit, least-privilege, audited policy; do not infer it from these routes.
 
@@ -423,11 +422,11 @@ Proposed endpoint: `GET /businesses/{businessId}/analytics/operations`.
 
 **Query parameters:**
 
-| Parameter | Meaning |
-|---|---|
-| `from` | Inclusive UTC instant for the requested interval. |
-| `to` | Exclusive UTC instant; require `from < to`. |
-| `branchId` | Optional branch filter; must belong to `{businessId}`. |
+| Parameter  | Meaning                                                                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `from`     | Inclusive UTC instant for the requested interval.                                                                                                                  |
+| `to`       | Exclusive UTC instant; require `from < to`.                                                                                                                        |
+| `branchId` | Optional branch filter; must belong to `{businessId}`.                                                                                                             |
 | `timezone` | Optional IANA timezone for bucket/date interpretation; defaults to the selected branch timezone when a single branch is selected. Exact aggregation semantics TBD. |
 
 Response should contain agreed basic appointment and queue counts, scoped to the business and optional branch. Metrics may include counts by relevant operational statuses only after appointment and queue lifecycle/status definitions are finalized. Do not expose customer-level rows from this endpoint. Exact metrics, status groupings, date boundaries, and business timezone behavior remain TBD. Advanced forecasting and cross-business intelligence are out of scope.
@@ -453,9 +452,9 @@ Counts are examples only; no status semantics or analytics metric definitions ar
 
 ### Connection lifecycle and authorization
 
-Connect to the backend Socket.IO endpoint over secure transport. Authentication credential may be sent in the Socket.IO `auth` handshake field if the proposed bearer approach is approved; do not put it in a URL query string. Server validates the credential and creates an authenticated principal. Guest status subscriptions require the approved narrow guest credential mechanism. Exact auth transport remains TBD.
+Connect to the backend Socket.IO endpoint over secure transport. The current browser implementation authenticates business users from the session cookie and guest tickets from `auth.publicAccessToken`; the server validates either credential before connection. Do not put credentials in a Socket.IO URL query string. Session and token lifecycle beyond the currently issued queue ticket credential remain subject to the security policy.
 
-The client never chooses an authorized room by sending a room name. It asks to subscribe using a resource identifier; the server resolves tenant/branch/queue from stored relationships, checks membership/assignment or own-ticket access, then joins a server-generated room. Platform Administrator role alone does not grant queue subscriptions.
+The client sends `tenant:join` with `{ "businessId": "...", "branchId": "..." }`. It never chooses a room name. The server resolves the active branch under the business, checks active membership and owner or staff assignment, and joins a server-generated branch room for owners or service-specific rooms for staff. Public queue tokens join only their ticket-specific private room. A platform role alone does not grant queue subscriptions.
 
 ### Event naming and payload conventions
 
@@ -463,25 +462,21 @@ Proposed event names use dotted lowercase namespaces. All payloads are JSON obje
 
 #### Client-to-server events
 
-| Event | Payload | Authorization / acknowledgement |
-|---|---|---|
-| `queue.subscribe` | `{ "queueConfigurationId": "..." }` | Resolve resource and authorize owner/staff assignment. Ack `{ "ok": true }` or safe error. |
-| `queue.unsubscribe` | `{ "queueConfigurationId": "..." }` | Remove only this socket's authorized subscription. |
-| `ticket.subscribe` | `{ "ticketId": "..." }` | Verify authenticated ownership or approved guest token context; customer can subscribe only to own ticket. |
-| `ticket.unsubscribe` | `{ "ticketId": "..." }` | Remove authorized subscription. |
+| Event         | Payload                                      | Authorization / acknowledgement                                                                  |
+| ------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `tenant:join` | `{ "businessId": "...", "branchId": "..." }` | Server verifies membership, active branch, and service scope; joins only server-generated rooms. |
 
 These event names are proposals. Subscription can be replaced by a REST snapshot plus server-managed subscription once the implementation design is finalized.
 
 #### Server-to-client events
 
-| Event | Example safe payload | Audience |
-|---|---|---|
-| `queue.snapshot` | `{ "queueConfigurationId": "...", "updatedAt": "...", "tickets": [{"ticketId":"...","sequenceNumber":42,"status":"WAITING"}] }` | Authorized staff/owner queue subscribers only. No customer names/contact details. |
-| `queue.ticket.updated` | `{ "ticketId": "...", "sequenceNumber": 42, "status": "CALLED", "occurredAt": "..." }` | Authorized operational subscribers; status transition only after policy approval. |
-| `ticket.status.updated` | `{ "ticketId": "...", "status": "WAITING", "position": 3, "occurredAt": "..." }` | That ticket's verified customer only; position/estimate availability TBD. |
-| `queue.error` | `{ "code": "FORBIDDEN", "message": "Subscription unavailable." }` | Requesting socket only; no resource-existence disclosure. |
+| Event                      | Example safe payload                                                                  | Audience                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `queue.updated`            | `{ "ticketId": "...", "serviceId": "...", "sequenceNumber": 42, "status": "CALLED" }` | Owner branch room and authorized staff service room; no customer name/contact.                            |
+| `ticket.updated`           | `{ "ticketId": "...", "serviceId": "...", "sequenceNumber": 42, "status": "CALLED" }` | Private room for the ticket access token only; no personal or internal staff data.                        |
+| `staff.assignment.updated` | `{ "branchId": "..." }`                                                               | Authorized owner branch room; staff subscriptions are invalidated/re-established after assignment change. |
 
-Payload examples show shape, not approved final event names or transition policy. Public/customer events never broadcast customer PII or other customers' details to branch/queue rooms. If one customer's status update is private, use a ticket-specific authorized delivery path rather than a whole-queue room.
+Operational room events contain only ticket ID, service ID, number, and status. Public/customer events are sent only to the private ticket room and omit customer PII and internal staff identity. Owner monitor reads may show customer display name and staff within the authenticated tenant-scoped REST response.
 
 ### Delivery, ordering, duplicate events, and recovery
 
@@ -527,16 +522,16 @@ No-content updates/deletes use `204` without a body. Do not return password hash
 
 `details` is optional and must contain safe field-level information, not submitted secrets. `requestId` is a correlation value, not an authorization token.
 
-| HTTP status | Stable code examples | Use |
-|---|---|---|
-| `400 Bad Request` | `VALIDATION_ERROR`, `INVALID_QUERY`, `UNKNOWN_FIELD` | Malformed input or rejected unknown fields. |
-| `401 Unauthorized` | `AUTHENTICATION_REQUIRED`, `INVALID_CREDENTIALS`, `CREDENTIAL_EXPIRED` | Missing/invalid authentication. |
-| `403 Forbidden` | `FORBIDDEN`, `FEATURE_DISABLED` | Authenticated but not permitted, or tenant feature denies operation. |
-| `404 Not Found` | `RESOURCE_NOT_FOUND` | Missing or intentionally concealed unauthorized resource. Avoid existence leaks. |
-| `409 Conflict` | `APPOINTMENT_CAPACITY_CONFLICT`, `APPOINTMENT_STATE_CONFLICT`, `QUEUE_SEQUENCE_CONFLICT` | Concurrency or state conflict. Do not claim an ordinary index resolves interval overlap. |
-| `422 Unprocessable Content` | `INVALID_RELATIONSHIP`, `INVALID_TIME_RANGE`, `OPERATION_NOT_ALLOWED` | Valid syntax but invalid domain relationship/state under approved policy. |
-| `429 Too Many Requests` | `RATE_LIMITED` | Rate/abuse control; `Retry-After` may be supplied. Thresholds TBD. |
-| `500 Internal Server Error` | `INTERNAL_ERROR` | Unexpected fault; generic message only, logged with request ID. |
+| HTTP status                 | Stable code examples                                                                     | Use                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `400 Bad Request`           | `VALIDATION_ERROR`, `INVALID_QUERY`, `UNKNOWN_FIELD`                                     | Malformed input or rejected unknown fields.                                              |
+| `401 Unauthorized`          | `AUTHENTICATION_REQUIRED`, `INVALID_CREDENTIALS`, `CREDENTIAL_EXPIRED`                   | Missing/invalid authentication.                                                          |
+| `403 Forbidden`             | `FORBIDDEN`, `FEATURE_DISABLED`                                                          | Authenticated but not permitted, or tenant feature denies operation.                     |
+| `404 Not Found`             | `RESOURCE_NOT_FOUND`                                                                     | Missing or intentionally concealed unauthorized resource. Avoid existence leaks.         |
+| `409 Conflict`              | `APPOINTMENT_CAPACITY_CONFLICT`, `APPOINTMENT_STATE_CONFLICT`, `QUEUE_SEQUENCE_CONFLICT` | Concurrency or state conflict. Do not claim an ordinary index resolves interval overlap. |
+| `422 Unprocessable Content` | `INVALID_RELATIONSHIP`, `INVALID_TIME_RANGE`, `OPERATION_NOT_ALLOWED`                    | Valid syntax but invalid domain relationship/state under approved policy.                |
+| `429 Too Many Requests`     | `RATE_LIMITED`                                                                           | Rate/abuse control; `Retry-After` may be supplied. Thresholds TBD.                       |
+| `500 Internal Server Error` | `INTERNAL_ERROR`                                                                         | Unexpected fault; generic message only, logged with request ID.                          |
 
 The error-code convention is stable uppercase `CATEGORY_DETAIL` with no internal collection/database terminology. Exact message localization and field-detail policy are TBD. Never return stack traces, credentials, database internals, or private information.
 
@@ -571,90 +566,83 @@ Proposed list convention: cursor pagination using `limit` (default `25`, maximum
 
 “Proposed” means a technical route shape suggested here; “Conditional” depends on an unresolved or Should/Could Have policy. Permissions marked TBD require the detailed role matrix before implementation.
 
-| # | Method | Route (under `/api/v1`) | Purpose | Authentication / required permission | Tenant scope | Status |
-|---:|---|---|---|---|---|---|
-| 1 | POST | `/auth/register` | Register global user | Public, rate-limited | Global | Proposed |
-| 2 | POST | `/auth/login` | Authenticate | Public, rate-limited | Global | Proposed |
-| 3 | POST | `/auth/logout` | End session | Authenticated | Global credential | Proposed; lifecycle TBD |
-| 4 | GET | `/auth/me` | Current identity | Authenticated | Global + safe platform roles | Proposed |
-| 5 | POST | `/auth/refresh` | Exchange approved refresh credential | Approved refresh credential (not expired access token) | Global | Conditional; transport/rotation/expiry/revocation TBD |
-| 6 | POST | `/auth/password-recovery-requests` | Start account recovery | Public, rate-limited | Global | Conditional; FR-AUTH-004 |
-| 7 | POST | `/auth/password-recovery-completions` | Complete recovery | Recovery challenge | Global | Conditional; policy TBD |
-| 8 | POST | `/businesses` | Create tenant + owner membership | Authenticated user | New tenant | Proposed; consistency required |
-| 9 | GET | `/me/businesses` | List memberships/businesses | Authenticated | Membership-derived | Proposed |
-| 10 | GET | `/businesses/{businessId}` | Read business | Active member | Resolved tenant | Proposed; field permissions TBD |
-| 11 | PATCH | `/businesses/{businessId}` | Update profile | Owner | Resolved tenant | Proposed |
-| 12 | PATCH | `/businesses/{businessId}/feature-settings` | Update eight flags | Owner | Resolved tenant | Proposed; granularity TBD |
-| 13 | GET | `/businesses/{businessId}/memberships` | List members | Owner | Resolved tenant | Proposed |
-| 14 | GET | `/businesses/{businessId}/memberships/{membershipId}` | Read member | Owner / self policy TBD | Resolved tenant | Proposed |
-| 15 | POST | `/businesses/{businessId}/memberships` | Add existing member | Owner | Resolved tenant | Conditional; invitations TBD |
-| 16 | PATCH | `/businesses/{businessId}/memberships/{membershipId}` | Change role | Owner | Resolved tenant | Conditional; role matrix TBD |
-| 17 | PATCH | `/businesses/{businessId}/memberships/{membershipId}/status` | Activate/deactivate | Owner | Resolved tenant | Conditional; lifecycle TBD |
-| 18 | POST | `/businesses/{businessId}/branches` | Create branch | Owner | Resolved tenant | Proposed |
-| 19 | GET | `/businesses/{businessId}/branches` | List branches | Owner / scoped staff | Resolved tenant | Proposed |
-| 20 | GET | `/businesses/{businessId}/branches/{branchId}` | Read branch | Owner / assigned staff | Resolved tenant | Proposed |
-| 21 | PATCH | `/businesses/{businessId}/branches/{branchId}` | Update branch | Owner | Resolved tenant | Proposed |
-| 22 | PATCH | `/businesses/{businessId}/branches/{branchId}/operating-hours` | Update hours/timezone | Owner | Resolved tenant | Proposed; schedule details TBD |
-| 23 | PATCH | `/businesses/{businessId}/branches/{branchId}/status` | Activate/deactivate branch | Owner | Resolved tenant | Proposed; impact TBD |
-| 24 | POST | `/businesses/{businessId}/services` | Create service | Owner | Resolved tenant | Proposed |
-| 25 | GET | `/businesses/{businessId}/services` | List services | Owner / scoped staff | Resolved tenant | Proposed |
-| 26 | GET | `/businesses/{businessId}/services/{serviceId}` | Read service | Tenant permission | Resolved tenant | Proposed |
-| 27 | PATCH | `/businesses/{businessId}/services/{serviceId}` | Update service | Owner | Resolved tenant | Proposed |
-| 28 | PUT | `/businesses/{businessId}/services/{serviceId}/branches` | Replace branch associations | Owner | Resolved tenant | Proposed |
-| 29 | PATCH | `/businesses/{businessId}/services/{serviceId}/status` | Activate/deactivate service | Owner | Resolved tenant | Proposed |
-| 30 | GET | `/businesses/{businessId}/staff-assignments` | List staff scope | Owner / self policy TBD | Resolved tenant | Proposed |
-| 31 | POST | `/businesses/{businessId}/staff-assignments` | Assign staff | Owner | Resolved tenant | Proposed; invite policy TBD |
-| 32 | GET | `/businesses/{businessId}/staff-assignments/{assignmentId}` | Read assignment | Owner / assigned staff | Resolved tenant | Proposed |
-| 33 | PATCH | `/businesses/{businessId}/staff-assignments/{assignmentId}` | Update schedule/scope | Owner | Resolved tenant | Proposed |
-| 34 | PATCH | `/businesses/{businessId}/staff-assignments/{assignmentId}/status` | Deactivate assignment | Owner | Resolved tenant | Proposed |
-| 35 | GET | `/public/branches/{branchId}/availability` | Find slots | Public, optional customer auth | Branch-resolved | Proposed |
-| 36 | POST | `/public/branches/{branchId}/appointments` | Book appointment | Public guest or authenticated customer | Branch-resolved | Proposed |
-| 37 | GET | `/appointments/{appointmentId}` | Read own/authorized appointment | Customer owner/guest credential or member | Resource-resolved | Proposed |
-| 38 | GET | `/businesses/{businessId}/appointments` | List appointments | Owner / assigned staff | Resolved tenant | Proposed |
-| 39 | POST | `/appointments/{appointmentId}/cancellations` | Cancel appointment | Owner appointment/guest | Resource-resolved | Proposed; cancellation rules TBD |
-| 40 | POST | `/appointments/{appointmentId}/reschedules` | Reschedule appointment | Owner appointment/guest | Resource-resolved | Conditional; Should Have |
-| 41 | PATCH | `/businesses/{businessId}/appointments/{appointmentId}` | Approved operational updates | Owner/assigned staff | Resolved tenant | Conditional; lifecycle TBD |
-| 42 | GET | `/public/qr/{qrCredential}` | Resolve QR | Public, rate-limited | Token-resolved | Conditional; token policy TBD |
-| 43 | GET | `/public/branches/{branchId}/queue-entry` | Public queue info | Public, rate-limited | Branch-resolved | Proposed alternative to #42 |
-| 44 | POST | `/public/branches/{branchId}/queue-tickets` | Join queue | Guest/customer | Branch-resolved | Proposed |
-| 45 | GET | `/public/queue-tickets/{ticketId}` | Guest ticket status | Approved limited credential | Ticket-resolved | Conditional; verification TBD |
-| 46 | GET | `/me/queue-tickets` | Own ticket list | Authenticated customer | User-owned records | Proposed |
-| 47 | GET | `/queue-tickets/{ticketId}` | Read own ticket | Customer owner/approved guest credential | Resource-resolved | Proposed |
-| 48 | GET | `/businesses/{businessId}/queue-configurations/{queueId}/tickets` | Operational queue list | Owner/assigned staff | Resolved tenant | Proposed; queue scope TBD |
-| 49 | POST | `/businesses/{businessId}/queue-tickets/{ticketId}/calls` | Call ticket | Owner/assigned staff | Resolved tenant | Conditional on transition policy |
-| 50 | POST | `/businesses/{businessId}/queue-tickets/{ticketId}/service-starts` | Start service | Owner/assigned staff | Resolved tenant | Conditional on transition policy |
-| 51 | POST | `/businesses/{businessId}/queue-tickets/{ticketId}/completions` | Complete ticket | Owner/assigned staff | Resolved tenant | Conditional on transition policy |
-| 52 | POST | `/businesses/{businessId}/queue-tickets/{ticketId}/no-shows` | Mark no-show | Owner/assigned staff | Resolved tenant | Conditional on transition policy |
-| 53 | POST | `/businesses/{businessId}/queue-tickets/{ticketId}/cancellations` | Cancel ticket | Customer owner/owner/staff | Resolved tenant | Conditional on transition/permissions |
-| 54 | POST | `/businesses/{businessId}/queue-tickets/{ticketId}/recalls` | Recall ticket | Owner/assigned staff | Resolved tenant | Conditional; policy TBD |
-| 55 | POST | `/businesses/{businessId}/queue-tickets/{ticketId}/skips` | Skip ticket | Owner/assigned staff | Resolved tenant | Conditional; policy TBD |
-| 56 | GET | `/me/appointments` | Own appointment list | Authenticated customer | User-owned records | Proposed |
-| 57 | GET | `/me/customer-profile` | Read customer profile | Authenticated customer | Own profile(s) | Conditional |
-| 58 | PATCH | `/me/customer-profile` | Update customer profile | Authenticated customer | Own profile(s) | Conditional; Could Have |
-| 59 | POST | `/businesses/{businessId}/branches/{branchId}/queue-qr-rotations` | Rotate QR credential | Owner | Resolved tenant | Conditional; policy TBD |
-| 60 | POST | `/businesses/{businessId}/public-access-tokens/{tokenId}/revocations` | Revoke token | Owner | Resolved tenant | Conditional; lifecycle TBD |
-| 61 | GET | `/platform/businesses` | List registered businesses | Platform Administrator | Platform scope | Proposed; Must Have |
-| 62 | GET | `/platform/businesses/{businessId}` | View basic business record | Platform Administrator | Platform scope | Proposed; Must Have |
-| 63 | PATCH | `/platform/businesses/{businessId}/status` | Activate/suspend tenant | Platform Administrator | Platform scope | Proposed; Must Have |
-| 64 | GET | `/platform/analytics/usage` | Platform usage analytics | Platform Administrator | Platform aggregate scope | Proposed; Must Have |
-| 65 | GET | `/businesses/{businessId}/analytics/operations` | Business appointment/queue counts | Owner | Resolved tenant/branch | Proposed; metric details TBD |
-| 66 | GET | `/public/businesses/{businessId}/branches?flow=appointments` | Contextual public branch choices for a known business | Public read; active business and appointments feature checked | Business context resolved from path; public-safe fields only | Proposed; no global directory; multiple-branch setting semantics TBD |
-| 67 | GET | `/public/branches/{branchId}/services` | Contextual public services at a selected branch (`flow` query) | Public read; branch, flow feature, and service selection settings checked | Tenant resolved through branch; active eligible services only | Proposed; service-selection-disabled behavior TBD |
+|   # | Method | Route (under `/api/v1`)                                               | Purpose                                                        | Authentication / required permission                                      | Tenant scope                                                  | Status                                                               |
+| --: | ------ | --------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------- |
+|   1 | POST   | `/auth/register`                                                      | Register global user                                           | Public, rate-limited                                                      | Global                                                        | Proposed                                                             |
+|   2 | POST   | `/auth/login`                                                         | Authenticate                                                   | Public, rate-limited                                                      | Global                                                        | Proposed                                                             |
+|   3 | POST   | `/auth/logout`                                                        | End session                                                    | Authenticated                                                             | Global credential                                             | Proposed; lifecycle TBD                                              |
+|   4 | GET    | `/auth/me`                                                            | Current identity                                               | Authenticated                                                             | Global + safe platform roles                                  | Proposed                                                             |
+|   5 | POST   | `/auth/refresh`                                                       | Exchange approved refresh credential                           | Approved refresh credential (not expired access token)                    | Global                                                        | Conditional; transport/rotation/expiry/revocation TBD                |
+|   6 | POST   | `/auth/password-recovery-requests`                                    | Start account recovery                                         | Public, rate-limited                                                      | Global                                                        | Conditional; FR-AUTH-004                                             |
+|   7 | POST   | `/auth/password-recovery-completions`                                 | Complete recovery                                              | Recovery challenge                                                        | Global                                                        | Conditional; policy TBD                                              |
+|   8 | POST   | `/businesses`                                                         | Create tenant + owner membership                               | Authenticated user                                                        | New tenant                                                    | Proposed; consistency required                                       |
+|   9 | GET    | `/me/businesses`                                                      | List memberships/businesses                                    | Authenticated                                                             | Membership-derived                                            | Proposed                                                             |
+|  10 | GET    | `/businesses/{businessId}`                                            | Read business                                                  | Active member                                                             | Resolved tenant                                               | Proposed; field permissions TBD                                      |
+|  11 | PATCH  | `/businesses/{businessId}`                                            | Update profile                                                 | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  12 | PATCH  | `/businesses/{businessId}/feature-settings`                           | Update eight flags                                             | Owner                                                                     | Resolved tenant                                               | Proposed; granularity TBD                                            |
+|  13 | GET    | `/businesses/{businessId}/memberships`                                | List members                                                   | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  14 | GET    | `/businesses/{businessId}/memberships/{membershipId}`                 | Read member                                                    | Owner / self policy TBD                                                   | Resolved tenant                                               | Proposed                                                             |
+|  15 | POST   | `/businesses/{businessId}/memberships`                                | Add existing member                                            | Owner                                                                     | Resolved tenant                                               | Conditional; invitations TBD                                         |
+|  16 | PATCH  | `/businesses/{businessId}/memberships/{membershipId}`                 | Change role                                                    | Owner                                                                     | Resolved tenant                                               | Conditional; role matrix TBD                                         |
+|  17 | PATCH  | `/businesses/{businessId}/memberships/{membershipId}/status`          | Activate/deactivate                                            | Owner                                                                     | Resolved tenant                                               | Conditional; lifecycle TBD                                           |
+|  18 | POST   | `/businesses/{businessId}/branches`                                   | Create branch                                                  | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  19 | GET    | `/businesses/{businessId}/branches`                                   | List branches                                                  | Owner / scoped staff                                                      | Resolved tenant                                               | Proposed                                                             |
+|  20 | GET    | `/businesses/{businessId}/branches/{branchId}`                        | Read branch                                                    | Owner / assigned staff                                                    | Resolved tenant                                               | Proposed                                                             |
+|  21 | PATCH  | `/businesses/{businessId}/branches/{branchId}`                        | Update branch                                                  | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  22 | PATCH  | `/businesses/{businessId}/branches/{branchId}/operating-hours`        | Update hours/timezone                                          | Owner                                                                     | Resolved tenant                                               | Proposed; schedule details TBD                                       |
+|  23 | PATCH  | `/businesses/{businessId}/branches/{branchId}/status`                 | Activate/deactivate branch                                     | Owner                                                                     | Resolved tenant                                               | Proposed; impact TBD                                                 |
+|  24 | POST   | `/businesses/{businessId}/services`                                   | Create service                                                 | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  25 | GET    | `/businesses/{businessId}/services`                                   | List services                                                  | Owner / scoped staff                                                      | Resolved tenant                                               | Proposed                                                             |
+|  26 | GET    | `/businesses/{businessId}/services/{serviceId}`                       | Read service                                                   | Tenant permission                                                         | Resolved tenant                                               | Proposed                                                             |
+|  27 | PATCH  | `/businesses/{businessId}/services/{serviceId}`                       | Update service                                                 | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  28 | PUT    | `/businesses/{businessId}/services/{serviceId}/branches`              | Replace branch associations                                    | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  29 | PATCH  | `/businesses/{businessId}/services/{serviceId}/status`                | Activate/deactivate service                                    | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  30 | GET    | `/businesses/{businessId}/staff-assignments`                          | List staff scope                                               | Owner / self policy TBD                                                   | Resolved tenant                                               | Proposed                                                             |
+|  31 | POST   | `/businesses/{businessId}/staff-assignments`                          | Assign staff                                                   | Owner                                                                     | Resolved tenant                                               | Proposed; invite policy TBD                                          |
+|  32 | GET    | `/businesses/{businessId}/staff-assignments/{assignmentId}`           | Read assignment                                                | Owner / assigned staff                                                    | Resolved tenant                                               | Proposed                                                             |
+|  33 | PATCH  | `/businesses/{businessId}/staff-assignments/{assignmentId}`           | Update schedule/scope                                          | Owner                                                                     | Resolved tenant                                               | Proposed                                                             |
+|  34 | PATCH  | `/businesses/{businessId}/staff-assignments/{assignmentId}`           | Change assignment status                                       | Owner                                                                     | Resolved tenant                                               | Proposed; same route as row 33, allowlisted status field             |
+|  35 | GET    | `/public/branches/{branchId}/availability`                            | Find slots                                                     | Public, optional customer auth                                            | Branch-resolved                                               | Proposed                                                             |
+|  36 | POST   | `/public/branches/{branchId}/appointments`                            | Book appointment                                               | Public guest or authenticated customer                                    | Branch-resolved                                               | Proposed                                                             |
+|  37 | GET    | `/appointments/{appointmentId}`                                       | Read own/authorized appointment                                | Customer owner/guest credential or member                                 | Resource-resolved                                             | Proposed                                                             |
+|  38 | GET    | `/businesses/{businessId}/appointments`                               | List appointments                                              | Owner / assigned staff                                                    | Resolved tenant                                               | Proposed                                                             |
+|  39 | POST   | `/appointments/{appointmentId}/cancellations`                         | Cancel appointment                                             | Owner appointment/guest                                                   | Resource-resolved                                             | Proposed; cancellation rules TBD                                     |
+|  40 | POST   | `/appointments/{appointmentId}/reschedules`                           | Reschedule appointment                                         | Owner appointment/guest                                                   | Resource-resolved                                             | Conditional; Should Have                                             |
+|  41 | PATCH  | `/businesses/{businessId}/appointments/{appointmentId}`               | Approved operational updates                                   | Owner/assigned staff                                                      | Resolved tenant                                               | Conditional; lifecycle TBD                                           |
+|  42 | GET    | `/public/qr/{qrCredential}`                                           | Resolve QR                                                     | Public, rate-limited                                                      | Token-resolved                                                | Proposed; public-safe active branch/services only                    |
+|  43 | POST   | `/public/branches/{branchId}/queue-tickets`                           | Join service/room queue                                        | Public guest or optional authenticated account                            | Branch-resolved                                               | Name/service required; contact and sign-in optional                  |
+|  44 | GET    | `/public/queue-tickets/{ticketId}`                                    | Read own guest ticket status                                   | Ticket token in `X-Public-Access-Token`                                   | Ticket-resolved                                               | Limited fields; ID alone is insufficient                             |
+|  45 | PATCH  | `/public/queue-tickets/{ticketId}/leave`                              | Leave queue                                                    | Ticket token                                                              | Ticket-resolved                                               | Eligible tickets become `CANCELLED`                                  |
+|  46 | POST   | `/public/queue-tickets/{ticketId}/profile`                            | Save customer profile after service                            | Ticket token + completed ticket                                           | Tenant resolved from ticket                                   | Explicit consent required                                            |
+|  47 | GET    | `/me/queue-tickets`                                                   | Own ticket list                                                | Authenticated customer                                                    | User-owned records                                            | Registered user's tickets only                                       |
+|  48 | GET    | `/businesses/{businessId}/queue-tickets?branchId=...&serviceId=...`   | Operational ticket list                                        | Owner/staff with branch/service scope                                     | Resolved tenant                                               | Explicit room filter supported                                       |
+|  49 | POST   | `/businesses/{businessId}/branches/{branchId}/queue/call-next`        | Call next in selected room                                     | Owner/staff assigned to branch/service                                    | Resolved tenant                                               | Body requires `serviceId`; atomic claim                              |
+|  50 | PATCH  | `/businesses/{businessId}/queue-tickets/{ticketId}`                   | Update supported ticket status                                 | Owner/staff assigned to ticket service                                    | Resolved tenant                                               | Conditional atomic update records actor/time                         |
+|  51 | GET    | `/businesses/{businessId}/branches/{branchId}/queue-monitor`          | Owner live room monitor                                        | Owner                                                                     | Resolved tenant and branch                                    | Includes current work and assigned staff                             |
+|  52 | GET    | `/businesses/{businessId}/queue-activity?branchId=...`                | Owner activity log                                             | Owner                                                                     | Resolved tenant and branch                                    | Chronological status events                                          |
+|  53 | GET    | `/me/appointments`                                                    | Own appointment list                                           | Authenticated customer                                                    | User-owned records                                            | Proposed                                                             |
+|  54 | GET    | `/me/customer-profile`                                                | Read customer profile                                          | Authenticated customer                                                    | Own profile(s)                                                | Conditional                                                          |
+|  55 | PATCH  | `/me/customer-profile`                                                | Update customer profile                                        | Authenticated customer                                                    | Own profile(s)                                                | Conditional; Could Have                                              |
+|  56 | POST   | `/businesses/{businessId}/branches/{branchId}/queue-qr-rotations`     | Rotate QR credential                                           | Owner                                                                     | Resolved tenant                                               | Conditional; policy TBD                                              |
+|  57 | POST   | `/businesses/{businessId}/public-access-tokens/{tokenId}/revocations` | Revoke token                                                   | Owner                                                                     | Resolved tenant                                               | Conditional; lifecycle TBD                                           |
+|  58 | GET    | `/platform/businesses`                                                | List registered businesses                                     | Platform Administrator                                                    | Platform scope                                                | Proposed; Must Have                                                  |
+|  59 | GET    | `/platform/businesses/{businessId}`                                   | View basic business record                                     | Platform Administrator                                                    | Platform scope                                                | Proposed; Must Have                                                  |
+|  60 | PATCH  | `/platform/businesses/{businessId}/status`                            | Activate/suspend tenant                                        | Platform Administrator                                                    | Platform scope                                                | Proposed; Must Have                                                  |
+|  61 | GET    | `/platform/analytics/usage`                                           | Platform usage analytics                                       | Platform Administrator                                                    | Platform aggregate scope                                      | Proposed; Must Have                                                  |
+|  62 | GET    | `/businesses/{businessId}/analytics/operations`                       | Business appointment/queue counts                              | Owner                                                                     | Resolved tenant/branch                                        | Proposed; metric details TBD                                         |
+|  63 | GET    | `/public/businesses/{businessId}/branches?flow=appointments`          | Contextual public branch choices for a known business          | Public read; active business and appointments feature checked             | Business context resolved from path; public-safe fields only  | Proposed; no global directory; multiple-branch setting semantics TBD |
+|  64 | GET    | `/public/branches/{branchId}/services`                                | Contextual public services at a selected branch (`flow` query) | Public read; branch, flow feature, and service selection settings checked | Tenant resolved through branch; active eligible services only | Proposed; service-selection-disabled behavior TBD                    |
 
 The inventory includes alternative/conditional routes so implementation planning can see the likely surface. It does not mean every route is approved for immediate implementation. In particular, token delivery, password recovery/refresh, member invitations, appointment status changes, rescheduling, and queue transition commands depend on open decisions.
 
 ### Socket.IO event inventory
 
-| Direction | Event | Purpose | Contract status |
-|---|---|---|---|
-| Client → server | `queue.subscribe` | Request authorized operational queue subscription. | Proposed; auth/queue scope validated server-side. |
-| Client → server | `queue.unsubscribe` | Remove own queue subscription. | Proposed. |
-| Client → server | `ticket.subscribe` | Request subscription to own ticket status. | Proposed; guest mechanism TBD. |
-| Client → server | `ticket.unsubscribe` | Remove own ticket subscription. | Proposed. |
-| Server → client | `queue.snapshot` | Safe operational queue snapshot. | Proposed; staff/owner only, no customer PII. |
-| Server → client | `queue.ticket.updated` | Ticket status notification to authorized operations audience. | Conditional on approved transitions. |
-| Server → client | `ticket.status.updated` | Individual customer's limited status update. | Proposed; private ticket audience only. |
-| Server → client | `queue.error` | Safe subscription/authorization failure. | Proposed; avoid resource enumeration. |
+| Direction       | Event                      | Purpose                                                      | Contract status                                                 |
+| --------------- | -------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------- |
+| Client → server | `tenant:join`              | Request owner branch or assigned staff service subscription. | Implemented; branch and membership resolved server-side.        |
+| Server → client | `queue.updated`            | Room-safe ticket status invalidation/update.                 | Implemented; owner branch and assigned staff service audiences. |
+| Server → client | `ticket.updated`           | Own limited ticket status update.                            | Implemented; private ticket token audience.                     |
+| Server → client | `staff.assignment.updated` | Notify owner monitor after assignment change.                | Implemented; branch-scoped.                                     |
 
 ## 19. Example Workflows
 
@@ -709,23 +697,25 @@ If a customer arrives without a business-provided booking link or known business
 
 ### 19.4 Guest joins a walk-in queue from a QR code
 
-1. Customer scans the branch QR. QR destination resolves through the approved public entry flow; the raw credential is not printed in logs or normal API output.
-2. Client retrieves public queue options and submits `POST /public/branches/{branchId}/queue-tickets`.
-3. Backend checks tenant queue feature, branch/queue/service relationship, input, rate limit, and atomically allocates sequence.
-4. Return a `WAITING` ticket summary. Guest status credential delivery/verification is unresolved and must be approved before the response can include any bearer capability.
+1. Customer scans the branch QR, which resolves through `GET /public/qr/{qrCredential}` to active branch and queue-enabled services.
+2. Guest provides a name and service/room; email, phone, and sign-in are optional. A single service may be selected directly.
+3. Client submits `POST /public/branches/{branchId}/queue-tickets`; backend validates tenant feature, service/branch relationship, input, and rate limit.
+4. Backend atomically increments that service's counter for the branch-local business date, creates the ticket, and returns its room, number, initial state, and one-time status credential.
+5. Client provides a secure status link using the ticket ID and an access token in the URL fragment. Subsequent REST status calls send the token in `X-Public-Access-Token`; token remains hashed in storage.
 
 ### 19.5 Staff manages a queue ticket
 
-1. Staff authenticates and requests `GET /businesses/{businessId}/queue-configurations/{queueId}/tickets` for an assigned branch.
-2. Staff invokes a proposed command such as `/calls` or `/service-starts` only after the product approves the corresponding transition.
-3. Backend checks membership, assignment, current status, tenant scope, writes the state/audit record, then emits a privacy-safe socket event.
-4. Staff and customers can refetch authoritative state through REST. No transition is presumed by this example.
+1. Staff selects an assigned branch and service/room; `GET /businesses/{businessId}/queue-tickets?branchId=...&serviceId=...` returns only authorized tickets.
+2. Staff calls next using `POST /businesses/{businessId}/branches/{branchId}/queue/call-next` with the selected `serviceId`.
+3. To start, complete, mark no-show, or cancel where allowed, staff uses the status patch endpoint. Backend validates the active membership, branch/service assignment, and current state, then atomically writes the new state, timestamp, and actor.
+4. Authorized owner/staff room subscribers and the ticket's private customer room receive privacy-safe events. REST remains authoritative after a reconnect.
 
 ### 19.6 Customer retrieves own ticket status
 
-1. Authenticated customer calls `GET /me/queue-tickets` or retrieves one ticket through `GET /queue-tickets/{ticketId}`.
-2. Guest uses an approved limited status credential; ticket ID alone is insufficient.
-3. Backend returns only that customer's status, approved position/estimate fields, and no other customers' private information.
+1. An authenticated customer may list only their tickets via `GET /me/queue-tickets`.
+2. A guest opens the returned secure ticket link; the client sends its fragment credential in `X-Public-Access-Token` to `GET /public/queue-tickets/{ticketId}`.
+3. Backend returns only ticket number, service/branch display, status, and safe progress; ticket ID alone is insufficient and no private customer or internal staff information is exposed.
+4. The guest may leave an eligible queue using the same ticket credential. After completion, profile saving is optional and requires explicit consent.
 
 ### 19.7 Owner views business analytics
 
@@ -766,25 +756,23 @@ sequenceDiagram
 
 ## 20. Unresolved API Decisions
 
-| Decision | API contract impact | Required resolution |
-|---|---|---|
-| Appointment capacity and conflict behavior | Availability inputs, staff/resource selection fields, conflict errors, and booking concurrency semantics. | Choose capacity model and define incompatible claims and interval/buffer behavior. |
-| Appointment states that consume capacity | Availability filters, cancellation/reschedule behavior, and partial status-index/query strategy. | Define capacity holding/release rules. |
-| Appointment lifecycle/transitions | Status-update commands, allowed cancellation/reschedule operations, and errors. | Approve state vocabulary, transitions, and actor permissions. |
-| Queue scope | Join request target and queue config route/ID semantics. | Choose branch, service, or configurable queues. |
-| Queue transitions | Whether `/calls`, `/service-starts`, `/completions`, `/no-shows`, `/cancellations`, `/recalls`, or `/skips` can execute. | Approve transition graph and actor authorization. |
-| Guest verification | Required request fields and how guests retrieve/cancel their own appointment/ticket. | Choose verification method, minimum data, and abuse controls. |
-| Public token expiry/revocation | Ticket access header, token issuance response, expiry and revocation errors. | Define token purposes, lifetime, reuse, rotation, and one-time delivery. |
-| Raw credential delivery | A customer needs some way to access a limited guest resource, while credentials must not leak in ordinary responses/logs. | Approve exact one-time delivery mechanism and threat controls; no raw token/hash is included in ordinary API responses here. |
-| Detailed role permissions | Membership, branch/service assignment, staff actions, and platform support endpoint access. | Approve role-to-action matrix and support access policy. |
-| Notification providers/channels | Optional notification commands, payloads, delivery state, and error behavior. | Select whether MVP sends external notifications and provider/channel/consent rules. |
-| Feature-setting granularity | Whether feature update route is business-only or supports branch overrides and precedence. | Decide business-wide versus branch-specific settings/defaults. |
-| Membership invitation/lifecycle | Whether create-member endpoint is enough or invite/accept resources are needed; reactivation/last-owner behavior. | Define invitation, role changes, activation, removal, and last-owner rules. |
-| API idempotency | Retries can duplicate business creation, appointments, or queue tickets. | Decide Idempotency-Key scope, retention, replay response, and duplicate policy. |
-| Authentication transport and refresh | `Authorization` versus cookie, CSRF, login response, logout, refresh, expiry, and revocation contracts. | Select transport/session model; this document's bearer approach is provisional. |
-| Password recovery | Recovery endpoint fields, challenge delivery, and errors. | Confirm Should Have scope, identity channel, and recovery policy. |
-| Date ranges and analytics | Timezone/bucket semantics and maximum query windows. | Define business analytics metrics and branch-local grouping. |
-| Error and pagination versioning | Stable codes, cursor format, bounds, and compatibility guarantees. | Approve shared conventions and operational bounds. |
-| Deployment and Socket.IO scaling | Credential/origin behavior, multiple-instance event distribution, reconnection expectations. | Select topology and adapter strategy after load/hosting decisions; no performance SLA is set. |
+| Decision                                   | API contract impact                                                                                                                              | Required resolution                                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Appointment capacity and conflict behavior | Availability inputs, staff/resource selection fields, conflict errors, and booking concurrency semantics.                                        | Choose capacity model and define incompatible claims and interval/buffer behavior.                    |
+| Appointment states that consume capacity   | Availability filters, cancellation/reschedule behavior, and partial status-index/query strategy.                                                 | Define capacity holding/release rules.                                                                |
+| Appointment lifecycle/transitions          | Status-update commands, allowed cancellation/reschedule operations, and errors.                                                                  | Approve state vocabulary, transitions, and actor permissions.                                         |
+| Queue transitions beyond core operations   | Recall, skip, reopening, exceptional transitions, and detailed actor permissions are not specified.                                              | Approve the complete transition graph; do not expose additional commands before that decision.        |
+| Guest identity verification                | Queue entry uses a required name with optional email/phone/sign-in; appointment guest policy and higher-assurance verification remain open.      | Define additional verification needs, abuse controls, and verified-contact process for deduplication. |
+| Public token lifecycle                     | Current queue status credential is scoped, hash-stored, and expires after 7 days. Rotation, revocation, and future credential types remain open. | Define longer-term public token lifecycle and replacement behavior for QR credentials.                |
+| Detailed role permissions                  | Membership, branch/service assignment, staff actions, and platform support endpoint access.                                                      | Approve role-to-action matrix and support access policy.                                              |
+| Notification providers/channels            | Optional notification commands, payloads, delivery state, and error behavior.                                                                    | Select whether MVP sends external notifications and provider/channel/consent rules.                   |
+| Feature-setting granularity                | Whether feature update route is business-only or supports branch overrides and precedence.                                                       | Decide business-wide versus branch-specific settings/defaults.                                        |
+| Membership invitation/lifecycle            | Whether create-member endpoint is enough or invite/accept resources are needed; reactivation/last-owner behavior.                                | Define invitation, role changes, activation, removal, and last-owner rules.                           |
+| API idempotency                            | Retries can duplicate business creation, appointments, or queue tickets.                                                                         | Decide Idempotency-Key scope, retention, replay response, and duplicate policy.                       |
+| Authentication transport and refresh       | `Authorization` versus cookie, CSRF, login response, logout, refresh, expiry, and revocation contracts.                                          | Select transport/session model; this document's bearer approach is provisional.                       |
+| Password recovery                          | Recovery endpoint fields, challenge delivery, and errors.                                                                                        | Confirm Should Have scope, identity channel, and recovery policy.                                     |
+| Date ranges and analytics                  | Timezone/bucket semantics and maximum query windows.                                                                                             | Define business analytics metrics and branch-local grouping.                                          |
+| Error and pagination versioning            | Stable codes, cursor format, bounds, and compatibility guarantees.                                                                               | Approve shared conventions and operational bounds.                                                    |
+| Deployment and Socket.IO scaling           | Credential/origin behavior, multiple-instance event distribution, reconnection expectations.                                                     | Select topology and adapter strategy after load/hosting decisions; no performance SLA is set.         |
 
 Until these decisions are resolved, endpoints marked conditional must not be treated as approved product behavior. Implementations should follow the finalized security and tenant-isolation constraints while seeking policy approval where a request would otherwise invent behavior.

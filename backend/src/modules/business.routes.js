@@ -20,6 +20,7 @@ import { validate, validateObjectIds, rejectUnknownQuery } from '../lib/validati
 import { authenticate, resolveMembership, requireRole } from '../middleware/authentication.js';
 import { publicFlowLimiter } from '../lib/rate-limits.js';
 import { env } from '../config/env.js';
+import { ioRef } from '../lib/socket.js';
 
 const router = Router();
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i);
@@ -130,7 +131,7 @@ const assignmentCreateSchema = z
   .object({
     email: z.string().trim().email().max(254),
     branchId: idSchema,
-    serviceIds: z.array(idSchema).default([]),
+    serviceIds: z.array(idSchema).min(1),
     workingHours: hoursSchema.default([]),
   })
   .strict();
@@ -507,6 +508,64 @@ router.post(
   }),
 );
 
+router.patch(
+  '/businesses/:businessId/staff-assignments/:assignmentId',
+  authenticate,
+  validateObjectIds('businessId', 'assignmentId'),
+  resolveMembership,
+  requireRole('owner'),
+  validate(
+    z
+      .object({
+        serviceIds: z.array(idSchema).min(1).optional(),
+        status: z.enum(['active', 'inactive']).optional(),
+      })
+      .strict()
+      .refine((body) => Object.keys(body).length > 0),
+  ),
+  asyncRoute(async (request, response) => {
+    const assignment = await StaffAssignment.findOne({
+      _id: request.params.assignmentId,
+      tenantId: request.tenantId,
+    });
+    if (!assignment)
+      throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Staff assignment was not found.');
+    if (request.body.serviceIds) {
+      const count = await Service.countDocuments({
+        tenantId: request.tenantId,
+        _id: { $in: request.body.serviceIds },
+        branchIds: assignment.branchId,
+        status: 'active',
+      });
+      if (count !== new Set(request.body.serviceIds).size)
+        throw new AppError(
+          422,
+          'INVALID_RELATIONSHIP',
+          'Each assigned service must be active at this branch.',
+        );
+      assignment.serviceIds = request.body.serviceIds;
+    }
+    if (request.body.status) assignment.status = request.body.status;
+    await assignment.save();
+    await recordAudit({
+      tenantId: request.tenantId,
+      actorUserId: request.user._id,
+      action: 'staff.assignment_updated',
+      resourceType: 'staff_assignment',
+      resourceId: assignment._id,
+      summary: 'Staff branch/service assignment updated.',
+    });
+    ioRef()
+      ?.to(`tenant:${request.tenantId}:branch:${assignment.branchId}`)
+      .emit('staff.assignment.updated', { branchId: assignment.branchId });
+    const targetMembership = await Membership.findById(assignment.membershipId).select('userId');
+    if (targetMembership) ioRef()?.in(`user:${targetMembership.userId}`).disconnectSockets(true);
+    response.json({
+      data: { id: assignment._id, serviceIds: assignment.serviceIds, status: assignment.status },
+    });
+  }),
+);
+
 router.get(
   '/businesses/:businessId/branches',
   authenticate,
@@ -764,6 +823,10 @@ router.post(
       resourceId: assignment._id,
       summary: 'Staff branch/service assignment updated.',
     });
+    ioRef()
+      ?.to(`tenant:${request.tenantId}:branch:${branch._id}`)
+      .emit('staff.assignment.updated', { branchId: branch._id });
+    ioRef()?.in(`user:${staffUser._id}`).disconnectSockets(true);
     response.status(201).json({
       data: {
         assignment: {

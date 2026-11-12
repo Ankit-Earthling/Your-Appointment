@@ -1,14 +1,14 @@
 # MongoDB Database Design — Your Appointment
 
-| Document attribute | Value |
-|---|---|
-| Status | Initial database design proposal for review |
-| Requirements baseline | SRS version 0.2 |
-| Architecture baseline | Architecture version 0.1 |
-| Version | 0.1 |
-| Last updated | 2026-11-11 |
+| Document attribute    | Value                                       |
+| --------------------- | ------------------------------------------- |
+| Status                | Initial database design proposal for review |
+| Requirements baseline | SRS version 0.3                             |
+| Architecture baseline | Architecture version 0.1                    |
+| Version               | 0.2                                         |
+| Last updated          | 2026-11-12                                  |
 
-This document translates the approved requirements and architecture into a proposed MongoDB/Mongoose persistence design. It is an implementation-planning artifact, not application code. Collection and field proposals are not an approval of product policies marked TBD in the baselines. In particular, scheduling capacity, appointment lifecycle, queue scope and transitions, guest identity policy, setting granularity, token lifecycle, retention, and MongoDB topology remain open.
+This document translates the approved requirements and architecture into a proposed MongoDB/Mongoose persistence design. It is an implementation-planning artifact, not application code. Collection and field proposals are not an approval of product policies marked TBD in the baselines. Scheduling capacity, appointment lifecycle, queue transitions, setting granularity, detailed guest verification, token lifecycle, legal retention overrides, and MongoDB topology remain open. Queue allocation scope is tenant/branch/service/local business date under SRS 0.3.
 
 ## 1. Database Design Overview
 
@@ -29,7 +29,7 @@ Mongoose models and repositories should be called by the owning modular-monolith
 
 ### Design labels used below
 
-- **Baseline constraint:** required by SRS v0.2 or the approved architecture.
+- **Baseline constraint:** required by SRS v0.3 or the approved architecture.
 - **Proposed design:** a technical structure recommended for implementation planning, subject to review.
 - **Conditional:** valid only if the related open policy is approved.
 - **TBD:** must not be finalized without a product or operational decision.
@@ -38,20 +38,20 @@ Mongoose models and repositories should be called by the owning modular-monolith
 
 The proposal uses **12 collections**. Feature settings are embedded in the business document rather than stored in a separate collection because the initial eight settings are bounded, tenant-level configuration read with the business. If settings later vary by branch or have independent version/history requirements, that choice must be revisited.
 
-| Collection | Purpose | Ownership | Important relationships / rationale |
-|---|---|---|---|
-| `users` | Global registered identities and authentication credentials. | Global | Referenced by memberships and optionally by tenant customer profiles. One identity can have different roles in different businesses. |
-| `businesses` | Tenant root, platform administration status, basic profile, and embedded feature settings. | Tenant root; `tenantId` equals `_id` | Parent identity for all tenant-owned records. One document supports atomic updates to bounded business configuration. |
-| `memberships` | User-to-business relationship and tenant roles/status. | Tenant-owned | References one global user and one business tenant. One relationship document is proposed per user/business pair. |
-| `branches` | Business locations, IANA timezone, operating hours, and activation state. | Tenant-owned | References the business through `tenantId`; referenced by services, staff assignments, appointments, and queue configurations. |
-| `services` | Bookable/queueable offerings and service configuration. | Tenant-owned | References eligible branches and optional service configuration. Staff eligibility is represented through staff assignments. |
-| `staffAssignments` | Staff membership's branch/service scope and proposed working schedule/exceptions. | Tenant-owned | References a membership, branch, and eligible services. Separates operational assignment/schedule from global user identity. |
-| `customerProfiles` | Tenant-scoped customer details optionally linked to a registered user. | Tenant-owned | A customer may have separate business-specific profile records without memberships. Guest identity and deduplication remain TBD. |
-| `appointments` | Reservation, customer reference/snapshot, interval, capacity claims, and lifecycle history. | Tenant-owned | References branch, service, optional staff assignment, and optional customer profile/user. Capacity fields are deliberately flexible pending decision. |
-| `queueConfigurations` | A branch's queue scope/configuration and atomic sequence counter. | Tenant-owned | References branch and optionally service. Exact one-per-branch/service/configurable scope and reset policy are TBD. |
-| `queueTickets` | Customer's ordered queue entry, initial status, timestamps, and action history. | Tenant-owned | References queue configuration and optional customer identity/profile. Sequence uniqueness is scoped to queue configuration. |
-| `publicAccessTokens` | Hash-only public QR-entry or limited ticket-status credentials. | Tenant-owned for business flows | References a branch, queue configuration, ticket, or other approved scoped target. Raw token is returned only when issued and is never stored. |
-| `auditEvents` | Append-oriented security, configuration, appointment, queue, and platform action records. | Tenant-owned for business actions; platform-scoped records may omit `tenantId` | References actor and target identifiers without copying sensitive customer payloads. Access is separately authorized. |
+| Collection            | Purpose                                                                                                   | Ownership                                                                      | Important relationships / rationale                                                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `users`               | Global registered identities and authentication credentials.                                              | Global                                                                         | Referenced by memberships and optionally by tenant customer profiles. One identity can have different roles in different businesses.                   |
+| `businesses`          | Tenant root, platform administration status, basic profile, and embedded feature settings.                | Tenant root; `tenantId` equals `_id`                                           | Parent identity for all tenant-owned records. One document supports atomic updates to bounded business configuration.                                  |
+| `memberships`         | User-to-business relationship and tenant roles/status.                                                    | Tenant-owned                                                                   | References one global user and one business tenant. One relationship document is proposed per user/business pair.                                      |
+| `branches`            | Business locations, IANA timezone, operating hours, and activation state.                                 | Tenant-owned                                                                   | References the business through `tenantId`; referenced by services, staff assignments, appointments, and queue configurations.                         |
+| `services`            | Bookable/queueable offerings and service configuration.                                                   | Tenant-owned                                                                   | References eligible branches and optional service configuration. Staff eligibility is represented through staff assignments.                           |
+| `staffAssignments`    | Staff membership's branch/service scope and proposed working schedule/exceptions.                         | Tenant-owned                                                                   | References a membership, branch, and eligible services. Separates operational assignment/schedule from global user identity.                           |
+| `customerProfiles`    | Tenant-scoped customer details optionally linked to a registered user.                                    | Tenant-owned                                                                   | A customer may have separate business-specific profile records without memberships. Guest identity and deduplication remain TBD.                       |
+| `appointments`        | Reservation, customer reference/snapshot, interval, capacity claims, and lifecycle history.               | Tenant-owned                                                                   | References branch, service, optional staff assignment, and optional customer profile/user. Capacity fields are deliberately flexible pending decision. |
+| `queueConfigurations` | A service/room queue and its atomic sequence counter.                                                     | Tenant-owned                                                                   | One configuration per tenant/branch/service. Counter dates use the branch's IANA timezone.                                                             |
+| `queueTickets`        | Customer's ordered queue entry, snapshot, initial status, immutable event history, and staff attribution. | Tenant-owned                                                                   | Required service/branch/config references; customer user/profile links are optional. Sequence uniqueness is per queue/date.                            |
+| `publicAccessTokens`  | Hash-only public QR-entry or limited ticket-status credentials.                                           | Tenant-owned for business flows                                                | References a branch, queue configuration, ticket, or other approved scoped target. Raw token is returned only when issued and is never stored.         |
+| `auditEvents`         | Append-oriented security, configuration, appointment, queue, and platform action records.                 | Tenant-owned for business actions; platform-scoped records may omit `tenantId` | References actor and target identifiers without copying sensitive customer payloads. Access is separately authorized.                                  |
 
 ### Embedding versus references
 
@@ -130,16 +130,16 @@ The diagram omits some `tenantId` ownership edges for readability: every collect
 
 **Purpose:** account identity and credential storage. It is global because users can belong to multiple businesses and can book as customers without tenant memberships.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Global user identifier. |
-| `emailNormalized` | String | Conditional | Normalized email if email login/identity is selected; uniqueness policy TBD. |
-| `phoneE164` | String | Conditional | Normalized phone if phone login/identity is selected; uniqueness policy TBD. |
-| `passwordHash` | String | Conditional | Required for password-based authentication; store bcrypt hash, never plaintext. Whether password auth is used for every account is TBD. |
-| `displayName` | String | Optional | User-facing name; exact required profile fields TBD. |
-| `accountStatus` | String | Yes | Proposed technical state for account availability; allowed states and suspension policy TBD. Do not confuse it with tenant membership status. |
-| `platformRoles` | Array of String | Optional | Platform-level roles only, including Platform Administrator if assigned. Tenant roles belong in memberships. Role assignment policy TBD. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                    | Type            |   Required? | Reference / validation                                                                                                                        |
+| ------------------------ | --------------- | ----------: | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `_id`                    | ObjectId        |         Yes | Global user identifier.                                                                                                                       |
+| `emailNormalized`        | String          | Conditional | Normalized email if email login/identity is selected; uniqueness policy TBD.                                                                  |
+| `phoneE164`              | String          | Conditional | Normalized phone if phone login/identity is selected; uniqueness policy TBD.                                                                  |
+| `passwordHash`           | String          | Conditional | Required for password-based authentication; store bcrypt hash, never plaintext. Whether password auth is used for every account is TBD.       |
+| `displayName`            | String          |    Optional | User-facing name; exact required profile fields TBD.                                                                                          |
+| `accountStatus`          | String          |         Yes | Proposed technical state for account availability; allowed states and suspension policy TBD. Do not confuse it with tenant membership status. |
+| `platformRoles`          | Array of String |    Optional | Platform-level roles only, including Platform Administrator if assigned. Tenant roles belong in memberships. Role assignment policy TBD.      |
+| `createdAt`, `updatedAt` | Date            |         Yes | UTC instants.                                                                                                                                 |
 
 Do not put tenant-specific permissions or business customer notes on the global user document. A business booking does not create a membership. Avoid storing raw access/refresh tokens here; token/session persistence needs a separate policy decision if revocation requires server-side records.
 
@@ -164,15 +164,15 @@ Email and example credentials are fictitious. Actual login identifier, verificat
 
 **Purpose:** business profile and SaaS administration record. The business document is the tenant root. To keep the uniform tenant predicate available, propose creating `_id` before insert and setting `tenantId` equal to `_id`.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Tenant identifier. |
-| `tenantId` | ObjectId | Yes | Equals this document's `_id`; documents the root's tenant identity explicitly. |
-| `name` | String | Yes | Business display name; normalization/uniqueness policy TBD. |
-| `status` | String | Yes | Proposed values include `active` and `suspended` to support the approved administrator capability. Detailed suspension effects are TBD. |
-| `profile` | Object | Yes | Bounded business profile details; exact fields TBD. |
-| `featureSettings` | Object | Yes | Eight initial tenant-controlled Boolean settings (Section 11); backend checks them. Business-wide versus branch-specific scope is TBD. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                    | Type     | Required? | Reference / validation                                                                                                                  |
+| ------------------------ | -------- | --------: | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `_id`                    | ObjectId |       Yes | Tenant identifier.                                                                                                                      |
+| `tenantId`               | ObjectId |       Yes | Equals this document's `_id`; documents the root's tenant identity explicitly.                                                          |
+| `name`                   | String   |       Yes | Business display name; normalization/uniqueness policy TBD.                                                                             |
+| `status`                 | String   |       Yes | Proposed values include `active` and `suspended` to support the approved administrator capability. Detailed suspension effects are TBD. |
+| `profile`                | Object   |       Yes | Bounded business profile details; exact fields TBD.                                                                                     |
+| `featureSettings`        | Object   |       Yes | Eight initial tenant-controlled Boolean settings (Section 11); backend checks them. Business-wide versus branch-specific scope is TBD.  |
+| `createdAt`, `updatedAt` | Date     |       Yes | UTC instants.                                                                                                                           |
 
 Do not embed branches, memberships, appointments, or history in this document; those grow and have independent access/query patterns. Example of feature setting keys is conceptual, not an approved API contract.
 
@@ -206,14 +206,14 @@ Values above illustrate independent configuration only; actual defaults and whet
 
 **Purpose:** relationship between one global user and one business tenant.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Membership identifier. |
-| `tenantId` | ObjectId | Yes | References `businesses._id`. |
-| `userId` | ObjectId | Yes | References global `users._id`. |
-| `roles` | Array of String | Yes | Tenant roles for this business (e.g. owner/staff). Exact combination and permission rules TBD. Customer status is not a membership by itself. |
-| `status` | String | Yes | Proposed active/inactive membership lifecycle; invitation and historical membership policy TBD. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                    | Type            | Required? | Reference / validation                                                                                                                        |
+| ------------------------ | --------------- | --------: | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `_id`                    | ObjectId        |       Yes | Membership identifier.                                                                                                                        |
+| `tenantId`               | ObjectId        |       Yes | References `businesses._id`.                                                                                                                  |
+| `userId`                 | ObjectId        |       Yes | References global `users._id`.                                                                                                                |
+| `roles`                  | Array of String |       Yes | Tenant roles for this business (e.g. owner/staff). Exact combination and permission rules TBD. Customer status is not a membership by itself. |
+| `status`                 | String          |       Yes | Proposed active/inactive membership lifecycle; invitation and historical membership policy TBD.                                               |
+| `createdAt`, `updatedAt` | Date            |       Yes | UTC instants.                                                                                                                                 |
 
 **Proposed recommendation:** maintain one durable membership document for a given `{tenantId,userId}` and update its lifecycle/roles rather than creating duplicate simultaneous memberships. This supports uniqueness and role changes; if membership history is needed, preserve it through audit events or a later explicit history design. Membership uniqueness and reactivation policy remain TBD.
 
@@ -235,16 +235,16 @@ Values above illustrate independent configuration only; actual defaults and whet
 
 **Purpose:** locations and branch-local schedule context.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Branch identifier. |
-| `tenantId` | ObjectId | Yes | Same tenant as its business. |
-| `name` | String | Yes | Branch name; duplicate names may be allowed unless a business rule says otherwise. |
-| `address` | Object | TBD | Required location fields and address normalization are TBD. |
-| `timezone` | String | Yes | Valid IANA timezone identifier. |
-| `operatingHours` | Array/Object | TBD | Bounded recurring local schedule; exact representation, holidays, and exception policy TBD. Interpret in `timezone`. |
-| `status` | String | Yes | Proposed active/inactive state. Deactivation behavior with future bookings/queues TBD. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                    | Type         | Required? | Reference / validation                                                                                               |
+| ------------------------ | ------------ | --------: | -------------------------------------------------------------------------------------------------------------------- |
+| `_id`                    | ObjectId     |       Yes | Branch identifier.                                                                                                   |
+| `tenantId`               | ObjectId     |       Yes | Same tenant as its business.                                                                                         |
+| `name`                   | String       |       Yes | Branch name; duplicate names may be allowed unless a business rule says otherwise.                                   |
+| `address`                | Object       |       TBD | Required location fields and address normalization are TBD.                                                          |
+| `timezone`               | String       |       Yes | Valid IANA timezone identifier.                                                                                      |
+| `operatingHours`         | Array/Object |       TBD | Bounded recurring local schedule; exact representation, holidays, and exception policy TBD. Interpret in `timezone`. |
+| `status`                 | String       |       Yes | Proposed active/inactive state. Deactivation behavior with future bookings/queues TBD.                               |
+| `createdAt`, `updatedAt` | Date         |       Yes | UTC instants.                                                                                                        |
 
 Branch hours can be embedded because they are bounded configuration belonging to the branch; appointment history and exception history should not be embedded here. Branch existence and tenant ownership must be validated for each reference.
 
@@ -270,18 +270,18 @@ The hours shape is illustrative only; overnight hours, holidays, and exception s
 
 **Purpose:** tenant-owned appointment and/or queue service configuration.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Service identifier. |
-| `tenantId` | ObjectId | Yes | Same tenant as all referenced branches. |
-| `name` | String | Yes | Display name. |
-| `status` | String | Yes | Proposed active/inactive state; deactivation with existing records TBD. |
-| `branchIds` | Array of ObjectId | TBD | Eligible branches, each same tenant. Whether a service can be business-wide or varies by branch is TBD. |
-| `appointmentEnabled` | Boolean | Yes | Whether this service supports appointment flow, subject to tenant feature setting. |
-| `queueEnabled` | Boolean | Yes | Whether this service supports queue flow, subject to tenant feature setting. |
-| `durationMinutes` | Number | Conditional | Required for appointment scheduling if applicable; positive integer/range validation TBD. |
-| `bufferBeforeMinutes`, `bufferAfterMinutes` | Number | Optional | Proposed fields only; buffer policy remains TBD. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                                       | Type              |   Required? | Reference / validation                                                                                  |
+| ------------------------------------------- | ----------------- | ----------: | ------------------------------------------------------------------------------------------------------- |
+| `_id`                                       | ObjectId          |         Yes | Service identifier.                                                                                     |
+| `tenantId`                                  | ObjectId          |         Yes | Same tenant as all referenced branches.                                                                 |
+| `name`                                      | String            |         Yes | Display name.                                                                                           |
+| `status`                                    | String            |         Yes | Proposed active/inactive state; deactivation with existing records TBD.                                 |
+| `branchIds`                                 | Array of ObjectId |         TBD | Eligible branches, each same tenant. Whether a service can be business-wide or varies by branch is TBD. |
+| `appointmentEnabled`                        | Boolean           |         Yes | Whether this service supports appointment flow, subject to tenant feature setting.                      |
+| `queueEnabled`                              | Boolean           |         Yes | Whether this service supports queue flow, subject to tenant feature setting.                            |
+| `durationMinutes`                           | Number            | Conditional | Required for appointment scheduling if applicable; positive integer/range validation TBD.               |
+| `bufferBeforeMinutes`, `bufferAfterMinutes` | Number            |    Optional | Proposed fields only; buffer policy remains TBD.                                                        |
+| `createdAt`, `updatedAt`                    | Date              |         Yes | UTC instants.                                                                                           |
 
 The two service-level flow flags do not bypass tenant feature configuration. If branch-specific duration, availability, or service settings are approved, the data model may need a branch-service association collection or a bounded embedded branch configuration; this is not selected now.
 
@@ -306,17 +306,17 @@ The two service-level flow flags do not bypass tenant feature configuration. If 
 
 **Purpose:** relationship between a staff membership and operational branch/service scope, including proposed bounded working schedule information.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Assignment identifier. |
-| `tenantId` | ObjectId | Yes | Tenant scope. |
-| `membershipId` | ObjectId | Yes | References an active staff membership in the same tenant. |
-| `branchId` | ObjectId | Yes | References a branch in the same tenant. Proposed one assignment per staff membership/branch. |
-| `serviceIds` | Array of ObjectId | Optional | Services at the same tenant/branch for which this assignment applies. Exact assignment rules TBD. |
-| `status` | String | Yes | Proposed active/inactive assignment state. |
-| `workingHours` | Array/Object | TBD | Recurring schedule in branch-local time. Exact schedule granularity TBD. |
-| `exceptions` | Array/Object | Optional | Bounded date-specific changes; do not store unbounded history here. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                    | Type              | Required? | Reference / validation                                                                            |
+| ------------------------ | ----------------- | --------: | ------------------------------------------------------------------------------------------------- |
+| `_id`                    | ObjectId          |       Yes | Assignment identifier.                                                                            |
+| `tenantId`               | ObjectId          |       Yes | Tenant scope.                                                                                     |
+| `membershipId`           | ObjectId          |       Yes | References an active staff membership in the same tenant.                                         |
+| `branchId`               | ObjectId          |       Yes | References a branch in the same tenant. Proposed one assignment per staff membership/branch.      |
+| `serviceIds`             | Array of ObjectId |  Optional | Services at the same tenant/branch for which this assignment applies. Exact assignment rules TBD. |
+| `status`                 | String            |       Yes | Proposed active/inactive assignment state.                                                        |
+| `workingHours`           | Array/Object      |       TBD | Recurring schedule in branch-local time. Exact schedule granularity TBD.                          |
+| `exceptions`             | Array/Object      |  Optional | Bounded date-specific changes; do not store unbounded history here.                               |
+| `createdAt`, `updatedAt` | Date              |       Yes | UTC instants.                                                                                     |
 
 Separating assignment from `users` keeps tenant permissions and schedule data contextual. A detailed schedule collection is not proposed because the current requirements do not establish schedule volume or recurrence rules; revisit if exceptions/history need independent querying or unbounded growth.
 
@@ -343,15 +343,15 @@ Schedule values are examples, not an approved recurrence or branch-assignment po
 
 **Purpose:** optional tenant-specific customer details. These records are not memberships and do not confer business permissions.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Profile identifier. |
-| `tenantId` | ObjectId | Yes | Business whose customer relationship/details this profile represents. |
-| `userId` | ObjectId | Optional | References a registered global `users` account; no membership is implied. |
-| `contact` | Object | TBD | Minimum needed contact fields; exact data/verification policy TBD. |
-| `displayName` | String | Optional | Tenant-facing customer name, subject to data minimization. |
-| `status` | String | Optional | If needed for tenant-specific profile lifecycle; policy TBD. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                    | Type     | Required? | Reference / validation                                                    |
+| ------------------------ | -------- | --------: | ------------------------------------------------------------------------- |
+| `_id`                    | ObjectId |       Yes | Profile identifier.                                                       |
+| `tenantId`               | ObjectId |       Yes | Business whose customer relationship/details this profile represents.     |
+| `userId`                 | ObjectId |  Optional | References a registered global `users` account; no membership is implied. |
+| `contact`                | Object   |       TBD | Minimum needed contact fields; exact data/verification policy TBD.        |
+| `displayName`            | String   |  Optional | Tenant-facing customer name, subject to data minimization.                |
+| `status`                 | String   |  Optional | If needed for tenant-specific profile lifecycle; policy TBD.              |
+| `createdAt`, `updatedAt` | Date     |       Yes | UTC instants.                                                             |
 
 Cross-tenant profile linkage must not reveal one business's customer notes to another business. For guests, `userId` may be absent. Whether a profile is created for each booking, deduplicated by verified contact, or omitted in favor of booking snapshots is unresolved; see Section 9.
 
@@ -375,26 +375,26 @@ This tenant profile example does not imply that the user is a member of the busi
 
 **Purpose:** independently queryable tenant-owned reservations with variable intervals and lifecycle history.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Appointment identifier. |
-| `tenantId` | ObjectId | Yes | Tenant owner. |
-| `branchId` | ObjectId | Yes | Same-tenant branch. |
-| `serviceId` | ObjectId | Yes | Same-tenant service eligible at the branch. |
-| `customerProfileId` | ObjectId | Optional | Same-tenant profile if profile model selected. |
-| `customerUserId` | ObjectId | Optional | Global registered customer identity; does not require membership. |
-| `customerSnapshot` | Object | Conditional | Proposed minimal booking-time contact snapshot alternative for stable historical contact; fields/data policy TBD. Avoid unnecessary duplication. |
-| `staffAssignmentId` | ObjectId | Optional | Same-tenant staff assignment if capacity model uses staff-specific assignment. |
-| `capacityClaims` | Array of Object | Conditional | Flexible proposed conceptual reservation claims such as `{kind, refId}`. Shape and use depend on approved capacity model; not yet a schema commitment. |
-| `startAt`, `endAt` | Date | Yes | UTC instants; require `startAt < endAt`. Detect actual interval overlap. |
-| `timezone` | String | Yes | Branch IANA timezone captured for interpretation/display context. Must match branch at creation; behavior if branch timezone later changes is TBD. |
-| `status` | String | Yes | Appointment lifecycle state. Allowed values/transitions are TBD; do not infer capacity consumption from status. |
-| `statusHistory` | Array of Object | Optional | Bounded history proposal with prior/new status, UTC time, actor reference, and safe reason metadata. If unbounded, move to separate event/history records in a later design. |
-| `cancelledAt` | Date | Optional | UTC cancellation instant if cancellation is recorded this way. |
-| `cancelledBy` | ObjectId | Optional | References global user when an authenticated actor cancels; guest actor attribution policy TBD. |
-| `cancellationReason` | String | Optional | Only if a reason is collected; allowed values, free text, and privacy policy TBD. |
-| `rescheduledFromId`, `rescheduledToId` | ObjectId | Optional | Same-tenant appointment references if rescheduling is modeled as linked records; update-vs-new-record behavior TBD. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                                  | Type            |   Required? | Reference / validation                                                                                                                                                       |
+| -------------------------------------- | --------------- | ----------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `_id`                                  | ObjectId        |         Yes | Appointment identifier.                                                                                                                                                      |
+| `tenantId`                             | ObjectId        |         Yes | Tenant owner.                                                                                                                                                                |
+| `branchId`                             | ObjectId        |         Yes | Same-tenant branch.                                                                                                                                                          |
+| `serviceId`                            | ObjectId        |         Yes | Same-tenant service eligible at the branch.                                                                                                                                  |
+| `customerProfileId`                    | ObjectId        |    Optional | Same-tenant profile if profile model selected.                                                                                                                               |
+| `customerUserId`                       | ObjectId        |    Optional | Global registered customer identity; does not require membership.                                                                                                            |
+| `customerSnapshot`                     | Object          | Conditional | Proposed minimal booking-time contact snapshot alternative for stable historical contact; fields/data policy TBD. Avoid unnecessary duplication.                             |
+| `staffAssignmentId`                    | ObjectId        |    Optional | Same-tenant staff assignment if capacity model uses staff-specific assignment.                                                                                               |
+| `capacityClaims`                       | Array of Object | Conditional | Flexible proposed conceptual reservation claims such as `{kind, refId}`. Shape and use depend on approved capacity model; not yet a schema commitment.                       |
+| `startAt`, `endAt`                     | Date            |         Yes | UTC instants; require `startAt < endAt`. Detect actual interval overlap.                                                                                                     |
+| `timezone`                             | String          |         Yes | Branch IANA timezone captured for interpretation/display context. Must match branch at creation; behavior if branch timezone later changes is TBD.                           |
+| `status`                               | String          |         Yes | Appointment lifecycle state. Allowed values/transitions are TBD; do not infer capacity consumption from status.                                                              |
+| `statusHistory`                        | Array of Object |    Optional | Bounded history proposal with prior/new status, UTC time, actor reference, and safe reason metadata. If unbounded, move to separate event/history records in a later design. |
+| `cancelledAt`                          | Date            |    Optional | UTC cancellation instant if cancellation is recorded this way.                                                                                                               |
+| `cancelledBy`                          | ObjectId        |    Optional | References global user when an authenticated actor cancels; guest actor attribution policy TBD.                                                                              |
+| `cancellationReason`                   | String          |    Optional | Only if a reason is collected; allowed values, free text, and privacy policy TBD.                                                                                            |
+| `rescheduledFromId`, `rescheduledToId` | ObjectId        |    Optional | Same-tenant appointment references if rescheduling is modeled as linked records; update-vs-new-record behavior TBD.                                                          |
+| `createdAt`, `updatedAt`               | Date            |         Yes | UTC instants.                                                                                                                                                                |
 
 **Illustrative document:**
 
@@ -420,22 +420,21 @@ This tenant profile example does not imply that the user is a member of the busi
 
 Angle-bracket values are placeholders, not allowed persisted enum values. This example does not select a capacity model or appointment lifecycle.
 
-### 4.10 `queueConfigurations` — queue scope and counter
+### 4.10 `queueConfigurations` — service/room queue and counter
 
-**Purpose:** configuration and sequence allocation boundary for one logical queue.
+**Purpose:** configuration and sequence allocation boundary for one tenant/branch/service queue.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Queue configuration identifier and proposed counter scope. |
-| `tenantId` | ObjectId | Yes | Tenant owner. |
-| `branchId` | ObjectId | Yes | Same-tenant branch. |
-| `scopeType` | String | Yes | Conceptual discriminator: branch, service, or configurable scope. Actual values/rules TBD. |
-| `serviceId` | ObjectId | Optional | Same-tenant service if the approved scope is service-specific. |
-| `status` | String | Yes | Proposed enabled/disabled or open/closed configuration; detailed operating lifecycle TBD. |
-| `nextSequence` | Number | Yes | Atomic counter state scoped to this queue config; initialization/reset semantics TBD. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                    | Type     | Required? | Reference / validation                                                     |
+| ------------------------ | -------- | --------: | -------------------------------------------------------------------------- |
+| `_id`                    | ObjectId |       Yes | Queue configuration identifier and proposed counter scope.                 |
+| `tenantId`               | ObjectId |       Yes | Tenant owner.                                                              |
+| `branchId`               | ObjectId |       Yes | Same-tenant branch.                                                        |
+| `serviceId`              | ObjectId |       Yes | Same-tenant service/room. Unique with tenant and branch.                   |
+| `isOpen`                 | Boolean  |       Yes | Whether this room currently accepts queue entries.                         |
+| `currentNumber`          | Number   |       Yes | Atomic counter scoped to queue configuration and branch-local `localDate`. |
+| `createdAt`, `updatedAt` | Date     |       Yes | UTC instants.                                                              |
 
-**Queue scope alternatives:** one queue per branch requires a single branch-level config; one queue per service requires a service reference and uniqueness per branch/service; configurable queues may require a stable queue key or additional scope metadata. Do not create multiple configurations under an assumed policy. Final scope, reset cadence, displayed numbering, counter rollover, and whether gaps are acceptable remain TBD.
+Every active queue-enabled service at a branch has an independent configuration. The business date is derived using the branch IANA timezone; changing `localDate` starts a new counter. Displayed names come from the service/room. Sequence gaps after failed ticket insertion remain implementation-tolerable unless product policy changes.
 
 **Example:**
 
@@ -444,37 +443,41 @@ Angle-bracket values are placeholders, not allowed persisted enum values. This e
   _id: ObjectId("66b900000000000000000001"),
   tenantId: ObjectId("66b200000000000000000001"),
   branchId: ObjectId("66b400000000000000000001"),
-  scopeType: "<approved-scope>",
   serviceId: ObjectId("66b500000000000000000001"),
-  status: "active",
-  nextSequence: 42,
+  isOpen: true,
+  localDate: "2026-11-12",
+  currentNumber: 42,
   createdAt: ISODate("2026-11-11T10:09:00Z"),
   updatedAt: ISODate("2026-11-12T04:31:00Z")
 }
 ```
 
-`scopeType` is a placeholder; no queue scope has been chosen.
+The unique configuration key is `{ tenantId, branchId, serviceId }`; the counter uniqueness key adds `localDate`.
 
 ### 4.11 `queueTickets` — queue entries and status history
 
 **Purpose:** independent ticket record for queue ordering, customer status, staff operations, and history.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Ticket identifier. |
-| `tenantId` | ObjectId | Yes | Tenant owner, same as queue configuration. |
-| `queueConfigurationId` | ObjectId | Yes | Same-tenant queue configuration. |
-| `branchId` | ObjectId | Yes | Same-tenant branch; may be derivable from queue but retained for common branch-scoped queries, with consistency validation. |
-| `serviceId` | ObjectId | Optional | Same-tenant service when relevant to chosen queue scope. |
-| `sequenceNumber` | Number | Yes | Unique within the approved queue/configuration sequence scope. Reset/epoch policy TBD. |
-| `customerProfileId` | ObjectId | Optional | Same-tenant profile if used. |
-| `customerUserId` | ObjectId | Optional | Global identity of registered customer; not a membership. |
-| `publicAccessTokenId` | ObjectId | Optional | References a same-tenant `publicAccessTokens` record for limited status access; never store raw token in ticket. |
-| `status` | String | Yes | One of initial statuses: `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `NO_SHOW`, `CANCELLED`. Allowed transitions remain TBD. |
-| `joinedAt` | Date | Yes | UTC instant. |
-| `calledAt`, `servingAt`, `completedAt`, `cancelledAt` | Date | Optional | Event-specific timestamps when applicable; exact state semantics TBD. |
-| `statusHistory` | Array of Object | Optional | Proposed bounded history containing status, UTC time, actor type/user reference, and safe metadata. Unbounded history needs a separate design. |
-| `createdAt`, `updatedAt` | Date | Yes | UTC instants. |
+| Field                                                                    | Type            |              Required? | Reference / validation                                                                                                        |
+| ------------------------------------------------------------------------ | --------------- | ---------------------: | ----------------------------------------------------------------------------------------------------------------------------- |
+| `_id`                                                                    | ObjectId        |                    Yes | Ticket identifier.                                                                                                            |
+| `tenantId`                                                               | ObjectId        |                    Yes | Tenant owner, same as queue configuration.                                                                                    |
+| `queueConfigurationId`                                                   | ObjectId        |                    Yes | Same-tenant queue configuration.                                                                                              |
+| `branchId`                                                               | ObjectId        |                    Yes | Same-tenant branch; may be derivable from queue but retained for common branch-scoped queries, with consistency validation.   |
+| `serviceId`                                                              | ObjectId        |                    Yes | Same-tenant service/room; identifies the independent queue.                                                                   |
+| `localDate`                                                              | String          |                    Yes | Business date calculated using the branch IANA timezone.                                                                      |
+| `sequenceNumber`                                                         | Number          |                    Yes | Unique within tenant + queue configuration + local date. Duplicate values across services are valid.                          |
+| `customerProfileId`                                                      | ObjectId        |               Optional | Same-tenant profile if used.                                                                                                  |
+| `customerUserId`                                                         | ObjectId        |               Optional | Global identity of registered customer; not a membership.                                                                     |
+| `customerSnapshot`                                                       | Object          |                    Yes | Queue-time display name and optional email/phone. Anonymous queue entry does not create a persistent profile.                 |
+| `profileConsentAt`, `profileCreatedAt`                                   | Date            |               Optional | Explicit post-completion opt-in and profile association timestamps.                                                           |
+| `publicAccessTokenId`                                                    | ObjectId        |               Optional | References a same-tenant `publicAccessTokens` record for limited status access; never store raw token in ticket.              |
+| `status`                                                                 | String          |                    Yes | One of initial statuses: `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `NO_SHOW`, `CANCELLED`. Allowed transitions remain TBD. |
+| `joinedAt`                                                               | Date            |                    Yes | UTC instant.                                                                                                                  |
+| `calledAt`, `serviceStartedAt`, `completedAt`, `cancelledAt`, `noShowAt` | Date            |               Optional | Server-generated UTC time for the corresponding event. Prior event times are not overwritten.                                 |
+| `calledByUserId`, `servingStaffUserId`, action actor references          | ObjectId        |               Optional | Authenticated staff responsible for each operational action.                                                                  |
+| `statusHistory`                                                          | Array of Object | Required/default empty | Append-only queue status events with UTC time and optional actor user reference; only the six initial statuses are used.      |
+| `createdAt`, `updatedAt`                                                 | Date            |                    Yes | UTC instants.                                                                                                                 |
 
 **Illustrative document:**
 
@@ -486,11 +489,12 @@ Angle-bracket values are placeholders, not allowed persisted enum values. This e
   branchId: ObjectId("66b400000000000000000001"),
   serviceId: ObjectId("66b500000000000000000001"),
   sequenceNumber: 42,
-  customerProfileId: ObjectId("66b700000000000000000001"),
+  customerProfileId: null,
+  customerSnapshot: { displayName: "Maya Rao", email: "", phone: "" },
   publicAccessTokenId: ObjectId("66bb00000000000000000001"),
   status: "WAITING",
   joinedAt: ISODate("2026-11-12T04:31:00Z"),
-  statusHistory: [{ status: "WAITING", at: ISODate("2026-11-12T04:31:00Z"), actorType: "customer" }],
+  statusHistory: [{ status: "WAITING", at: ISODate("2026-11-12T04:31:00Z"), actorUserId: null }],
   createdAt: ISODate("2026-11-12T04:31:00Z"),
   updatedAt: ISODate("2026-11-12T04:31:00Z")
 }
@@ -502,20 +506,20 @@ This document illustrates only the initial `WAITING` state. It does not define s
 
 **Purpose:** hash-only storage for limited public entry/status access such as QR resolution or a customer's ticket status lookup.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Token record identifier. |
-| `tenantId` | ObjectId | Yes | Tenant scope for business-linked token. |
-| `tokenHash` | String/Binary | Yes | Hash of a cryptographically random token. Unique index required; raw token must not be stored/logged. Hash algorithm and encoding selected in implementation security design. |
-| `purpose` | String | Yes | Narrow use such as branch entry or ticket status; approved scopes TBD. |
-| `targetType` | String | Yes | Branch, queue configuration, or ticket reference category. |
-| `targetId` | ObjectId | Yes | Target must be same tenant and valid for purpose. |
-| `createdAt` | Date | Yes | UTC issuance time. |
-| `expiresAt` | Date | Optional | Expiration field; whether/when tokens expire is TBD. |
-| `revokedAt` | Date | Optional | UTC revocation time. |
-| `status` | String | Yes | Proposed active/revoked lifecycle marker; token lifecycle policy TBD. |
+| Field        | Type          | Required? | Reference / validation                                                                                                                                                        |
+| ------------ | ------------- | --------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `_id`        | ObjectId      |       Yes | Token record identifier.                                                                                                                                                      |
+| `tenantId`   | ObjectId      |       Yes | Tenant scope for business-linked token.                                                                                                                                       |
+| `tokenHash`  | String/Binary |       Yes | Hash of a cryptographically random token. Unique index required; raw token must not be stored/logged. Hash algorithm and encoding selected in implementation security design. |
+| `purpose`    | String        |       Yes | Narrow use such as branch entry or ticket status; approved scopes TBD.                                                                                                        |
+| `targetType` | String        |       Yes | Branch, queue configuration, or ticket reference category.                                                                                                                    |
+| `targetId`   | ObjectId      |       Yes | Target must be same tenant and valid for purpose.                                                                                                                             |
+| `createdAt`  | Date          |       Yes | UTC issuance time.                                                                                                                                                            |
+| `expiresAt`  | Date          |  Optional | Ticket-status credentials expire after seven days; QR credential lifecycle remains TBD.                                                                                       |
+| `revokedAt`  | Date          |  Optional | UTC revocation time.                                                                                                                                                          |
+| `status`     | String        |       Yes | Proposed active/revoked lifecycle marker; token lifecycle policy TBD.                                                                                                         |
 
-The raw token is returned only at issuance if the approved flow requires it; later lookup hashes the presented token and queries by `tokenHash`. A unique hash prevents duplicate token records. A ticket may reference its token record by `publicAccessTokenId`; the token record's target points back to the intended ticket, so both sides must be validated. Expiry must be enforced by application logic regardless of any future TTL cleanup. TTL deletion is not proposed until retention and token audit requirements are settled.
+The raw token is returned only at issuance; later lookup hashes the presented token and queries by `tokenHash`. A unique hash prevents duplicate token records. A ticket may reference its token record by `publicAccessTokenId`; the token record's target points back to the intended ticket, so both sides must be validated. Ticket-status credentials currently expire after seven days and expiry is enforced by application logic. QR credential expiry/rotation policy and TTL cleanup remain TBD.
 
 **Illustrative record (hash placeholder only):**
 
@@ -536,17 +540,17 @@ The raw token is returned only at issuance if the approved flow requires it; lat
 
 **Purpose:** record sensitive or significant actions without copying full business or customer documents.
 
-| Field | Type | Required? | Reference / validation |
-|---|---|---:|---|
-| `_id` | ObjectId | Yes | Event identifier. |
-| `scope` | String | Yes | `tenant` or `platform` conceptual scope. |
-| `tenantId` | ObjectId | Conditional | Required for tenant-scoped event; absent only for platform-only event with no single tenant. |
-| `actor` | Object | Yes | Actor type and optional global `userId`; system jobs may use a system actor. Snapshot only role/context needed to interpret the action. |
-| `action` | String | Yes | Stable action category; final action vocabulary TBD. |
-| `target` | Object | Optional | Resource type and identifier, optionally tenant context; validate tenant consistency. |
-| `at` | Date | Yes | UTC event time. |
-| `metadata` | Object | Optional | Allowlisted safe details; exclude passwords, raw tokens, unnecessary personal data, and full request bodies. |
-| `correlationId` | String | Optional | Request/operation correlation identifier if available; must not contain secrets. |
+| Field           | Type     |   Required? | Reference / validation                                                                                                                  |
+| --------------- | -------- | ----------: | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `_id`           | ObjectId |         Yes | Event identifier.                                                                                                                       |
+| `scope`         | String   |         Yes | `tenant` or `platform` conceptual scope.                                                                                                |
+| `tenantId`      | ObjectId | Conditional | Required for tenant-scoped event; absent only for platform-only event with no single tenant.                                            |
+| `actor`         | Object   |         Yes | Actor type and optional global `userId`; system jobs may use a system actor. Snapshot only role/context needed to interpret the action. |
+| `action`        | String   |         Yes | Stable action category; final action vocabulary TBD.                                                                                    |
+| `target`        | Object   |    Optional | Resource type and identifier, optionally tenant context; validate tenant consistency.                                                   |
+| `at`            | Date     |         Yes | UTC event time.                                                                                                                         |
+| `metadata`      | Object   |    Optional | Allowlisted safe details; exclude passwords, raw tokens, unnecessary personal data, and full request bodies.                            |
+| `correlationId` | String   |    Optional | Request/operation correlation identifier if available; must not contain secrets.                                                        |
 
 Application modules should append audit events through a restricted audit boundary. Ordinary application paths should not update or delete prior events. MongoDB collection permissions, immutable storage, retention, and any tamper-evidence requirements need operational/security design; “append-oriented” does not mean MongoDB itself is inherently immutable.
 
@@ -570,20 +574,20 @@ Action names and metadata keys are examples, not an approved audit vocabulary.
 
 ### Collection summary of ownership and required references
 
-| Collection | `tenantId` rule | Reference checks |
-|---|---|---|
-| `users` | No; global identity. | None to tenant data in the identity record. |
-| `businesses` | Required and equal to `_id` as tenant root. | Root record. |
-| `memberships` | Required. | `businesses._id` and global `users._id`. |
-| `branches` | Required. | Business root via `tenantId`. |
-| `services` | Required. | Business root and every `branchIds` entry. |
-| `staffAssignments` | Required. | Membership, branch, and each service all same tenant. |
-| `customerProfiles` | Required. | Business root; optional global user does not create a membership. |
-| `appointments` | Required. | Branch, service, optional profile/assignment all same tenant; optional user is global. |
-| `queueConfigurations` | Required. | Branch and optional service same tenant. |
-| `queueTickets` | Required. | Queue configuration, branch, service, and optional profile same tenant; optional user global. |
-| `publicAccessTokens` | Required for business flows. | Target resource must belong to same tenant and match token purpose. |
-| `auditEvents` | Required for tenant scope; absent for platform scope only. | Tenant target must match `tenantId`; actor user is global. |
+| Collection            | `tenantId` rule                                            | Reference checks                                                                              |
+| --------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `users`               | No; global identity.                                       | None to tenant data in the identity record.                                                   |
+| `businesses`          | Required and equal to `_id` as tenant root.                | Root record.                                                                                  |
+| `memberships`         | Required.                                                  | `businesses._id` and global `users._id`.                                                      |
+| `branches`            | Required.                                                  | Business root via `tenantId`.                                                                 |
+| `services`            | Required.                                                  | Business root and every `branchIds` entry.                                                    |
+| `staffAssignments`    | Required.                                                  | Membership, branch, and each service all same tenant.                                         |
+| `customerProfiles`    | Required.                                                  | Business root; optional global user does not create a membership.                             |
+| `appointments`        | Required.                                                  | Branch, service, optional profile/assignment all same tenant; optional user is global.        |
+| `queueConfigurations` | Required.                                                  | Branch and optional service same tenant.                                                      |
+| `queueTickets`        | Required.                                                  | Queue configuration, branch, service, and optional profile same tenant; optional user global. |
+| `publicAccessTokens`  | Required for business flows.                               | Target resource must belong to same tenant and match token purpose.                           |
+| `auditEvents`         | Required for tenant scope; absent for platform scope only. | Tenant target must match `tenantId`; actor user is global.                                    |
 
 ## 5. Tenant Ownership and Data Isolation
 
@@ -607,8 +611,8 @@ The following are MongoDB-style conceptual patterns. The `authorizedTenantId` is
 db.appointments.find({
   tenantId: authorizedTenantId,
   branchId: authorizedBranchId,
-  _id: requestedAppointmentId
-})
+  _id: requestedAppointmentId,
+});
 ```
 
 **Tenant-scoped update:**
@@ -618,10 +622,10 @@ db.queueTickets.updateOne(
   {
     tenantId: authorizedTenantId,
     queueConfigurationId: authorizedQueueId,
-    _id: requestedTicketId
+    _id: requestedTicketId,
   },
-  { $set: { updatedAt: new Date() } }
-)
+  { $set: { updatedAt: new Date() } },
+);
 ```
 
 The update filter must also include the expected current status/version when performing a guarded transition after the lifecycle policy is approved. A matched count of zero is not permission to retry without reauthorization.
@@ -632,8 +636,8 @@ The update filter must also include the expected current status/version when per
 db.memberships.findOne({
   tenantId: targetBusinessId,
   userId: authenticatedUserId,
-  status: "active"
-})
+  status: 'active',
+});
 ```
 
 The `targetBusinessId` is resolved from the resource or checked against the user's membership before protected access. This lookup does not make a customer a member merely because they have a booking.
@@ -644,9 +648,9 @@ The `targetBusinessId` is resolved from the resource or checked against the user
 db.services.findOne({
   _id: requestedServiceId,
   tenantId: authorizedTenantId,
-  status: "active",
-  branchIds: authorizedBranchId
-})
+  status: 'active',
+  branchIds: authorizedBranchId,
+});
 ```
 
 ### Analytics and audit queries
@@ -659,39 +663,40 @@ Avoid generic repository methods that accept arbitrary filters and pass them dir
 
 Indexes are proposed for known lookups and invariants, not a finalized tuning plan. Compound index order matters: equality predicates commonly lead, followed by sort/range fields that support the dominant query. Validate real query plans and data volume before adding redundant indexes. Every index adds storage and write cost.
 
-| Collection | Proposed index (field order) | Unique? | Purpose / query / invariant | Condition or caveat |
-|---|---|---:|---|---|
-| `users` | `{ emailNormalized: 1 }`, partial where field is a string | Yes | Locate email identity and prevent duplicate normalized email. | Only if email identity is selected and uniqueness is approved. |
-| `users` | `{ phoneE164: 1 }`, partial where field is a string | Yes | Locate phone identity and prevent duplicate normalized phone. | Only if phone identity is selected and uniqueness is approved. |
-| `users` | `{ platformRoles: 1, accountStatus: 1 }` | No | Find platform administrators/eligible accounts for platform operations. | Add only if required by platform administration query patterns; multikey index. |
-| `businesses` | `{ tenantId: 1 }` | Yes | Root lookup by tenant; establishes `tenantId == _id`. | `_id` is already unique; this is a redundant invariant index unless queries/validation need it. Prefer application invariant plus `_id` lookup; do not add without justification. |
-| `businesses` | `{ status: 1, updatedAt: -1 }` | No | Platform business listing/filter by activation state. | Query-driven; `status` vocabulary is limited to approved administration needs. |
-| `memberships` | `{ tenantId: 1, userId: 1 }` | Yes | Enforce one relationship per user/business and resolve authorization. | Proposed durable one-document-per-pair model; membership lifecycle/history policy TBD. |
-| `memberships` | `{ userId: 1, status: 1, tenantId: 1 }` | No | List a user's active businesses, equality first then tenant results. | Query-driven; status semantics to be finalized. |
-| `memberships` | `{ tenantId: 1, status: 1, roles: 1, userId: 1 }` | No | Tenant owner/staff listing and role filters. | `roles` is an array/multikey; review query shape before adoption. |
-| `branches` | `{ tenantId: 1, status: 1, name: 1 }` | No | List active branches for a tenant, optionally sorted by name. | Name need not be unique unless product decides so. |
-| `services` | `{ tenantId: 1, status: 1, branchIds: 1 }` | No | Find active services offered at a branch. | `branchIds` multikey; do not combine with another array field in this compound index. |
-| `staffAssignments` | `{ tenantId: 1, branchId: 1, membershipId: 1 }` | Yes | Prevent duplicate staff assignment per branch and find staff scope. | Conditional on proposed one assignment per membership/branch policy. |
-| `staffAssignments` | `{ tenantId: 1, branchId: 1, status: 1, serviceIds: 1 }` | No | Find assigned staff/service availability candidates. | Multikey and schedule query shape; add only after schedule design. |
-| `customerProfiles` | `{ tenantId: 1, userId: 1 }` | No | Find a user's tenant-specific profile. | Non-unique until profile deduplication and multiple-profile policy are decided. A partial unique index may be considered later. |
-| `appointments` | `{ tenantId: 1, branchId: 1, startAt: 1 }` | No | Branch calendar retrieval over a start-time range. | Supports tenant/branch equality then start range/sort; `endAt` overlap predicate remains a residual filter. |
-| `appointments` | `{ tenantId: 1, staffAssignmentId: 1, startAt: 1 }` | No | Staff schedule retrieval and candidate conflict lookup. | Conditional on staff-specific/hybrid capacity. Optional assignment records need appropriate partial filter. |
-| `appointments` | `{ tenantId: 1, serviceId: 1, startAt: 1 }` | No | Service-level calendar/availability query. | Query-driven; not a conflict guarantee for service/resource capacity. |
-| `appointments` | `{ tenantId: 1, "capacityClaims.refId": 1, startAt: 1 }` | No | Candidate lookup by a claimed capacity reference. | Conditional on the approved capacity-claim shape; multikey behavior and claim kinds must be reviewed. |
-| `appointments` | `{ tenantId: 1, customerUserId: 1, startAt: -1 }` | No | Registered customer's own appointments. | Add if customer portal queries are supported; user ID is a global identity reference. |
-| `appointments` | `{ tenantId: 1, customerProfileId: 1, startAt: -1 }` | No | Tenant customer profile history. | Only if profile-based history query is needed. |
-| `queueConfigurations` | `{ tenantId: 1, branchId: 1, scopeType: 1, serviceId: 1 }` | Conditional unique | Resolve one queue configuration for an approved scope. | Uniqueness depends on whether branch-only, branch/service, or multiple configurable queues are allowed; null/missing service uniqueness semantics must be designed. |
-| `queueTickets` | `{ tenantId: 1, queueConfigurationId: 1, sequenceNumber: 1 }` | Yes | Enforce unique sequence number within queue scope and support ordered retrieval. | If numbering resets, add an approved epoch/generation field to the key; reset policy TBD. |
-| `queueTickets` | `{ tenantId: 1, queueConfigurationId: 1, status: 1, sequenceNumber: 1 }` | No | Retrieve queue tickets by status in sequence order. | Status transition policy is TBD; avoid partial active-status index until active states are approved. |
-| `queueTickets` | `{ tenantId: 1, customerUserId: 1, joinedAt: -1 }` | No | Retrieve registered customer's tickets. | Customer portal query; no cross-tenant access. |
-| `queueTickets` | `{ tenantId: 1, customerProfileId: 1, joinedAt: -1 }` | No | Retrieve tenant-scoped profile tickets. | Only if profile history is needed. |
-| `publicAccessTokens` | `{ tokenHash: 1 }` | Yes | Find presented token by its hash and prevent duplicate hashes. | Required for hash-only lookup. Never index/store raw token. |
-| `publicAccessTokens` | `{ tenantId: 1, targetType: 1, targetId: 1, purpose: 1, status: 1 }` | No | Find/revoke scoped credentials for target resource. | Query-driven; do not reveal token existence publicly. |
-| `publicAccessTokens` | `{ expiresAt: 1 }` TTL | No | Optional cleanup of expired token records. | Do not enable until expiry and deletion/retention policies are approved. TTL is asynchronous cleanup, not authorization enforcement. |
-| `auditEvents` | `{ tenantId: 1, at: -1 }` | No | Tenant audit history by time. | Tenant events only; platform events without `tenantId` need a separate scope index. |
-| `auditEvents` | `{ scope: 1, at: -1 }` | No | Platform audit/operational review and time ordering. | Platform access remains explicitly authorized. |
-| `auditEvents` | `{ tenantId: 1, target.type: 1, target.id: 1, at: -1 }` | No | Audit history for a tenant resource. | Add if resource-level audit lookup is required. |
-| `auditEvents` | `{ correlationId: 1 }` | No | Trace related actions across an operation. | Add if correlation IDs are adopted and queried. |
+| Collection            | Proposed index (field order)                                                | Unique? | Purpose / query / invariant                                             | Condition or caveat                                                                                                                                                               |
+| --------------------- | --------------------------------------------------------------------------- | ------: | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`               | `{ emailNormalized: 1 }`, partial where field is a string                   |     Yes | Locate email identity and prevent duplicate normalized email.           | Only if email identity is selected and uniqueness is approved.                                                                                                                    |
+| `users`               | `{ phoneE164: 1 }`, partial where field is a string                         |     Yes | Locate phone identity and prevent duplicate normalized phone.           | Only if phone identity is selected and uniqueness is approved.                                                                                                                    |
+| `users`               | `{ platformRoles: 1, accountStatus: 1 }`                                    |      No | Find platform administrators/eligible accounts for platform operations. | Add only if required by platform administration query patterns; multikey index.                                                                                                   |
+| `businesses`          | `{ tenantId: 1 }`                                                           |     Yes | Root lookup by tenant; establishes `tenantId == _id`.                   | `_id` is already unique; this is a redundant invariant index unless queries/validation need it. Prefer application invariant plus `_id` lookup; do not add without justification. |
+| `businesses`          | `{ status: 1, updatedAt: -1 }`                                              |      No | Platform business listing/filter by activation state.                   | Query-driven; `status` vocabulary is limited to approved administration needs.                                                                                                    |
+| `memberships`         | `{ tenantId: 1, userId: 1 }`                                                |     Yes | Enforce one relationship per user/business and resolve authorization.   | Proposed durable one-document-per-pair model; membership lifecycle/history policy TBD.                                                                                            |
+| `memberships`         | `{ userId: 1, status: 1, tenantId: 1 }`                                     |      No | List a user's active businesses, equality first then tenant results.    | Query-driven; status semantics to be finalized.                                                                                                                                   |
+| `memberships`         | `{ tenantId: 1, status: 1, roles: 1, userId: 1 }`                           |      No | Tenant owner/staff listing and role filters.                            | `roles` is an array/multikey; review query shape before adoption.                                                                                                                 |
+| `branches`            | `{ tenantId: 1, status: 1, name: 1 }`                                       |      No | List active branches for a tenant, optionally sorted by name.           | Name need not be unique unless product decides so.                                                                                                                                |
+| `services`            | `{ tenantId: 1, status: 1, branchIds: 1 }`                                  |      No | Find active services offered at a branch.                               | `branchIds` multikey; do not combine with another array field in this compound index.                                                                                             |
+| `staffAssignments`    | `{ tenantId: 1, branchId: 1, membershipId: 1 }`                             |     Yes | Prevent duplicate staff assignment per branch and find staff scope.     | Conditional on proposed one assignment per membership/branch policy.                                                                                                              |
+| `staffAssignments`    | `{ tenantId: 1, branchId: 1, status: 1, serviceIds: 1 }`                    |      No | Find assigned staff/service availability candidates.                    | Multikey and schedule query shape; add only after schedule design.                                                                                                                |
+| `customerProfiles`    | `{ tenantId: 1, userId: 1 }`                                                |      No | Find a user's tenant-specific profile.                                  | Non-unique until profile deduplication and multiple-profile policy are decided. A partial unique index may be considered later.                                                   |
+| `appointments`        | `{ tenantId: 1, branchId: 1, startAt: 1 }`                                  |      No | Branch calendar retrieval over a start-time range.                      | Supports tenant/branch equality then start range/sort; `endAt` overlap predicate remains a residual filter.                                                                       |
+| `appointments`        | `{ tenantId: 1, staffAssignmentId: 1, startAt: 1 }`                         |      No | Staff schedule retrieval and candidate conflict lookup.                 | Conditional on staff-specific/hybrid capacity. Optional assignment records need appropriate partial filter.                                                                       |
+| `appointments`        | `{ tenantId: 1, serviceId: 1, startAt: 1 }`                                 |      No | Service-level calendar/availability query.                              | Query-driven; not a conflict guarantee for service/resource capacity.                                                                                                             |
+| `appointments`        | `{ tenantId: 1, "capacityClaims.refId": 1, startAt: 1 }`                    |      No | Candidate lookup by a claimed capacity reference.                       | Conditional on the approved capacity-claim shape; multikey behavior and claim kinds must be reviewed.                                                                             |
+| `appointments`        | `{ tenantId: 1, customerUserId: 1, startAt: -1 }`                           |      No | Registered customer's own appointments.                                 | Add if customer portal queries are supported; user ID is a global identity reference.                                                                                             |
+| `appointments`        | `{ tenantId: 1, customerProfileId: 1, startAt: -1 }`                        |      No | Tenant customer profile history.                                        | Only if profile-based history query is needed.                                                                                                                                    |
+| `queueConfigurations` | `{ tenantId: 1, branchId: 1, serviceId: 1 }`                                |     Yes | Resolve the one service/room queue in a branch.                         | Service reference is required; branch/service relationship must be validated.                                                                                                     |
+| `queueCounters`       | `{ tenantId: 1, queueConfigurationId: 1, localDate: 1 }`                    |     Yes | Enforce independent atomic daily counter per room/service.              | `localDate` is computed in branch timezone; concurrent upsert duplicate-key retries must increment the established counter.                                                       |
+| `queueTickets`        | `{ tenantId: 1, queueConfigurationId: 1, localDate: 1, sequenceNumber: 1 }` |     Yes | Enforce unique daily sequence within a service queue.                   | Duplicate sequence values across queues are valid.                                                                                                                                |
+| `queueTickets`        | `{ tenantId: 1, queueConfigurationId: 1, localDate: 1, status: 1 }`         |      No | Retrieve room tickets by state/date and ordered number.                 | Transition policy remains TBD; no active-status assumption is embedded in a partial index.                                                                                        |
+| `queueTickets`        | `{ tenantId: 1, customerUserId: 1, joinedAt: -1 }`                          |      No | Retrieve registered customer's tickets.                                 | Customer portal query; no cross-tenant access.                                                                                                                                    |
+| `queueTickets`        | `{ tenantId: 1, customerProfileId: 1, joinedAt: -1 }`                       |      No | Retrieve tenant-scoped profile tickets.                                 | Only if profile history is needed.                                                                                                                                                |
+| `publicAccessTokens`  | `{ tokenHash: 1 }`                                                          |     Yes | Find presented token by its hash and prevent duplicate hashes.          | Required for hash-only lookup. Never index/store raw token.                                                                                                                       |
+| `publicAccessTokens`  | `{ tenantId: 1, targetType: 1, targetId: 1, purpose: 1, status: 1 }`        |      No | Find/revoke scoped credentials for target resource.                     | Query-driven; do not reveal token existence publicly.                                                                                                                             |
+| `publicAccessTokens`  | `{ expiresAt: 1 }` TTL                                                      |      No | Optional cleanup of expired token records.                              | Do not enable until expiry and deletion/retention policies are approved. TTL is asynchronous cleanup, not authorization enforcement.                                              |
+| `auditEvents`         | `{ tenantId: 1, at: -1 }`                                                   |      No | Tenant audit history by time.                                           | Tenant events only; platform events without `tenantId` need a separate scope index.                                                                                               |
+| `auditEvents`         | `{ scope: 1, at: -1 }`                                                      |      No | Platform audit/operational review and time ordering.                    | Platform access remains explicitly authorized.                                                                                                                                    |
+| `auditEvents`         | `{ tenantId: 1, target.type: 1, target.id: 1, at: -1 }`                     |      No | Audit history for a tenant resource.                                    | Add if resource-level audit lookup is required.                                                                                                                                   |
+| `auditEvents`         | `{ correlationId: 1 }`                                                      |      No | Trace related actions across an operation.                              | Add if correlation IDs are adopted and queried.                                                                                                                                   |
 
 ### Appointment interval index limitation
 
@@ -741,21 +746,15 @@ The set of statuses that consume capacity and the appointment lifecycle/allowed 
 
 ### Queue configuration
 
-`queueConfigurations` is the proposed owner of sequence allocation. It points to a tenant and branch, optionally a service, and stores a counter scoped to one logical queue. Three possible scope models remain open:
-
-- **One queue per branch:** one configuration per tenant/branch; service may remain a ticket attribute.
-- **One queue per service:** configuration uniqueness includes tenant/branch/service.
-- **Configurable queues:** a business may define queue identities; a stable queue key/name and uniqueness rules would be needed.
-
-The final model, reset cadence, numbering display, rollover/epoch, and gap policy are TBD. If sequence numbers reset, uniqueness should include the generation/epoch selected for that reset policy.
+`queueConfigurations` represents one independently operated service/room queue. Its unique scope is tenant + branch + service. Each active queue-enabled service at a branch has its own configuration and counter. The business date is computed from the branch's IANA timezone; each date's counter starts independently. Duplicate sequence values in different services or branches are valid. Sequence gaps after an incomplete join remain acceptable unless a later product decision says otherwise.
 
 ### Queue ticket
 
-Each `queueTickets` document identifies a single join event and its sequence, initial status, tenant/branch/queue context, optional service/customer references, timestamps, and staff action attribution. The initial vocabulary is exactly `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `NO_SHOW`, and `CANCELLED`. No allowed transition graph is defined here. Status history should record relevant actor and UTC time but not private details unnecessary to the audit trail.
+Each `queueTickets` document identifies a join event and includes required tenant, branch, service/room, queue configuration, branch-local business date, sequence number, initial status, UTC `joinedAt`, and a minimum customer display/contact snapshot. `customerProfileId` and `customerUserId` are optional and are not required to enter anonymously. Queue entry alone does not create a customer profile. Optional profile consent and consent time are recorded only after completion. Timestamp fields include call, service start, completion, cancellation and no-show; actor references identify authenticated staff responsible for each action. An append-only status/event history preserves every actual UTC transition time and actor. The initial status vocabulary is exactly `WAITING`, `CALLED`, `SERVING`, `COMPLETED`, `NO_SHOW`, and `CANCELLED`; recall, skip, reopen, and exceptional transitions remain TBD.
 
 ### Atomic sequence allocation
 
-A conceptual counter operation is an atomic update to the chosen queue configuration's `nextSequence`, returning the incremented value to use as `sequenceNumber`. Concurrent increments to one MongoDB document are serialized atomically by the database, but that alone does not atomically combine the counter increment with a separate ticket insert.
+A conceptual counter operation is an atomic `$inc` to the counter keyed by tenant, queue configuration, and branch-local `localDate`, returning the incremented value as `sequenceNumber`. A unique index on those keys makes independent daily service queues explicit. Concurrent increments to one MongoDB document are serialized atomically by the database, but that alone does not atomically combine the counter increment with a separate ticket insert.
 
 Implementation must evaluate:
 
@@ -763,9 +762,9 @@ Implementation must evaluate:
 - Whether counter increment plus ticket insert must be one transaction. Multi-document transactions require a deployment configuration that supports them; do not assume every MongoDB deployment has that capability.
 - If transactions are unavailable, whether an atomic counter with tolerable gaps, idempotent retry strategy, or a different data model can satisfy the approved queue policy.
 - How duplicate client retries are detected without issuing multiple tickets; idempotency policy is not specified in the SRS and must not be invented as an external behavior.
-- How reset/counter epoch and unique ticket indexes interact.
+- The daily reset uses the branch timezone to derive a new `localDate`; UTC is used for stored instants. Daylight-saving boundaries follow IANA timezone conversion.
 
-The database design must not use an application-process counter or an unprotected read-then-increment operation.
+The database design must not use an application-process counter or an unprotected read-then-increment operation. Tickets remain linked to their original service; a migration must not assign a missing legacy service to an arbitrary room. Existing service-specific tickets keep their configuration and numbers.
 
 ## 9. Customer Identity and Guest Handling
 
@@ -782,9 +781,9 @@ The same global user may have customer identity and also hold owner/staff member
 
 1. **Tenant profile linked to global user where registered:** supports per-business history while isolating business-specific data. Requires a policy for one or multiple profiles per user per tenant.
 2. **Profile per booking/ticket or embedded contact snapshot:** reduces profile matching needs and can preserve contact information as supplied at that time, but duplicates personal data and complicates correction/deletion.
-3. **No persistent tenant profile for guests:** store only the minimum allowed booking/ticket contact data and token reference, reducing a separate identity store but making repeat interactions and customer history harder.
+3. **No persistent tenant profile for anonymous queue entrants:** store only a minimum ticket snapshot until its retention period; create/associate a business profile only after explicit post-service consent.
 
-No alternative is selected. Deduplication by email/phone without verified identifiers risks linking different people or leaking data. Guest verification, contact minimization, retention, and merge policy remain TBD. The database should avoid a global customer record that silently exposes one tenant's data to another.
+For queue entry, the initial SRS decision is the minimum snapshot plus explicit post-service consent. Reuse a profile only when a verified matching contact exists within that tenant; unverified matches must not be merged. The current implementation has no email/phone verification flow, so contact-based deduplication is not available until a verified contact state exists. Appointment profile handling remains as specified separately. No global customer record may silently expose one tenant's data to another.
 
 ## 10. Public Access Tokens
 
@@ -806,16 +805,16 @@ Whether QR tokens are permanent or rotatable, whether ticket tokens expire, how 
 
 The initial eight tenant-controlled settings are stored in the bounded `businesses.featureSettings` object:
 
-| Setting key (proposed) | Meaning | Backend check examples |
-|---|---|---|
-| `appointments` | Appointment capability for the tenant. | Availability and appointment creation/management flows. |
-| `walkInQueue` | Walk-in queue capability. | QR join, ticket creation, staff queue actions. |
-| `staffSelection` | Whether the customer-facing flow selects staff. | Booking input and availability behavior; does not itself define the capacity model. |
-| `serviceSelection` | Whether customer flow selects a service. | Booking/queue options; exact behavior if disabled is TBD. |
-| `guestBooking` | Whether guest appointment/queue participation is enabled. | Public flows without a registered customer account. |
-| `customerAccounts` | Whether customer account capabilities are enabled for this tenant. | Tenant-facing customer account functions; does not disable global account identity or owner/staff authentication. |
-| `notifications` | Tenant notification capability setting. | Any approved notification operation; does not select a provider/channel. |
-| `multipleBranches` | Whether the tenant may configure/use multiple branches. | Branch creation and branch selection rules. |
+| Setting key (proposed) | Meaning                                                            | Backend check examples                                                                                            |
+| ---------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `appointments`         | Appointment capability for the tenant.                             | Availability and appointment creation/management flows.                                                           |
+| `walkInQueue`          | Walk-in queue capability.                                          | QR join, ticket creation, staff queue actions.                                                                    |
+| `staffSelection`       | Whether the customer-facing flow selects staff.                    | Booking input and availability behavior; does not itself define the capacity model.                               |
+| `serviceSelection`     | Whether customer flow selects a service.                           | Booking/queue options; exact behavior if disabled is TBD.                                                         |
+| `guestBooking`         | Whether guest appointment/queue participation is enabled.          | Public flows without a registered customer account.                                                               |
+| `customerAccounts`     | Whether customer account capabilities are enabled for this tenant. | Tenant-facing customer account functions; does not disable global account identity or owner/staff authentication. |
+| `notifications`        | Tenant notification capability setting.                            | Any approved notification operation; does not select a provider/channel.                                          |
+| `multipleBranches`     | Whether the tenant may configure/use multiple branches.            | Branch creation and branch selection rules.                                                                       |
 
 The names are proposed storage keys, not API contracts. Business-wide versus branch-specific scope remains TBD. Embedding the settings allows the backend to read the effective values with the business and update the bounded configuration together. If branch-level overrides are approved, define precedence explicitly and consider a separate branch override structure rather than silently adding mixed semantics.
 
@@ -876,13 +875,21 @@ MongoDB transaction availability depends on deployment configuration. Before cho
 
 ## 14. Data Lifecycle and Retention
 
-Retention and deletion periods are not established by SRS v0.2 and must not be invented here.
+SRS 0.3 proposes these initial queue retention defaults; they require legal/jurisdiction review and automated enforcement before production:
+
+- **Queue customer snapshot:** retain name and optional contact data for 12 months after queue entry, then erase or anonymize identifying snapshot fields.
+- **Minimal queue ticket/event record:** retain the minimum non-identifying ticket and event data needed for operational reporting and audit for 24 months, then delete it. Non-identifying aggregate counts may be retained longer.
+- **Queue access tokens:** ticket credentials expire after 7 days; reject them at access time regardless of TTL cleanup timing.
+- **Customer profiles:** remain tenant-scoped and separate from anonymous ticket snapshots. Consent and any later profile data are distinct from the ticket's retention clock; profile deletion/anonymization remains subject to legal and product rules.
+- **Audit events:** queue activity is built from ticket event history. Other audit-event retention, archival, tamper-evidence, and deletion exception policies remain TBD.
+- **Backups and archives:** deletion propagation, encryption, access control, restore testing, cadence, and recovery objectives remain deployment and legal decisions.
 
 - **Business/branch/service deactivation:** prefer an inactive/suspended state when needed to stop new activity while preserving historical references. Exact effects on existing appointments and tickets remain TBD.
-- **Appointments and tickets:** avoid cascading deletion when these records are needed for audit/history or operational integrity. Retention and customer data minimization/deletion behavior require policy and legal review.
+- **Appointments:** avoid cascading deletion where records are needed for audit/history or operational integrity; appointment retention remains subject to legal and product policy.
+- **Queue tickets:** enforce the SRS snapshot-minimization and 12/24-month periods above. Preserve useful operational aggregates without retaining identifying guest details beyond the snapshot period.
 - **Customer profiles:** support privacy-aware deletion/anonymization only after deciding how references, legal retention, and audit records interact. Do not copy personal data into audit events.
 - **Memberships/users:** deactivation and account deletion need to preserve authorization history and avoid orphaned ownership. Last-owner and reactivation policies remain TBD.
-- **Tokens:** reject expired/revoked tokens at access time. Cleanup/TTL policy depends on expiry and retention decisions.
+- **Tokens:** reject expired/revoked tokens at access time. The queue ticket credential expiry is seven days; token cleanup may use TTL but does not replace access checks.
 - **Audit events:** retention, archival, tamper-evidence, and deletion exception policy are TBD. Do not use a TTL index without approval.
 - **Backups and archives:** establish encryption, access control, backup cadence, restore testing, deletion propagation, and recovery objectives before production. Providers and RPO/RTO remain TBD.
 - **Hard versus soft delete:** use soft deactivation for operational entities where history must remain; final hard deletion/anonymization approach depends on legal/privacy requirements and product policy.
@@ -918,36 +925,34 @@ This section guides future implementation but deliberately includes no model cod
 
 ## 16. Unresolved Decisions and Their Database Impact
 
-| Decision still open | Why the database design depends on it | What must be decided before implementation |
-|---|---|---|
-| Appointment capacity: staff-specific, service/resource-based, or hybrid | Determines required references/claims, conflict query predicates, availability indexes, and write serialization. | Select conceptual capacity model and define what makes two claims incompatible. |
-| Which appointment states consume capacity | Determines conflict filters, capacity release, partial indexes, cancellation behavior. | Define capacity-consuming states and timing of hold/release. |
-| Appointment lifecycle and allowed transitions | Determines status vocabulary, history shape, permitted mutations, and rescheduling link behavior. | Approve lifecycle states, transitions, cancellation/reschedule/no-show policy. |
-| Queue scope: branch, service, or configurable | Determines queue configuration identity, unique index, counter scope, and ticket lookup path. | Select queue scope and whether multiple queues per branch are allowed. |
-| Queue transitions, recall, skip, reopening, exceptional transitions | Determines status validation, status history, active queue queries, and state-dependent indexing. | Approve transition graph and actor permissions; initial six statuses remain as stated in SRS. |
-| Queue reset, numbering, gaps, rollover | Determines sequence epoch, uniqueness key, display value, and counter lifecycle. | Define reset cadence, numbering presentation, gap tolerance, and epoch behavior. |
-| Guest identity and verification | Determines required contact fields, profile creation, ticket lookup, token scope, and abuse prevention. | Decide minimum data, verification method, lookup rights, and guest retention. |
-| Customer profile deduplication | Determines unique indexes, user/profile cardinality, merge behavior, and privacy boundaries. | Decide profile-per-tenant policy and whether/how verified identifiers may deduplicate. |
-| Feature setting granularity | Embedded business settings fit current business-wide baseline; branch overrides change storage and precedence. | Decide business-wide vs branch-specific effective setting and defaults. Guest/customer settings remain independent. |
-| Membership uniqueness and lifecycle | Determines unique index, reactivation/history strategy, and role representation. | Confirm one durable membership per user/business, role combinations, invitations, removal, and last-owner rule. |
-| MongoDB topology and transaction availability | Determines whether multi-document invariants can use transactions and how atomicity/retries are implemented. | Select/verify deployment topology and transaction support before choosing booking and queue-join algorithm. |
-| Data retention and deletion | Affects hard/soft deletion, TTL indexes, profile anonymization, audit, backups, and legal compliance. | Define legal jurisdictions, retention periods, deletion/anonymization rules, and backup deletion behavior. |
-| Token expiry and revocation | Affects token fields, validation, cleanup indexes, and customer status availability. | Define token purposes, validity, reuse, rotation/revocation, and QR replacement policy. |
-| Identity identifiers and uniqueness | Determines account indexes and profile matching. | Decide email/phone/other identifiers, normalization, verification, and uniqueness rules. |
-| Branch/service/staff schedule granularity | Determines whether hours fit embedded bounded documents or need additional collections and indexes. | Define recurring schedule, exceptions, branch overrides, and time-zone edge cases. |
-| Platform analytics and audit visibility | Determines aggregation/query indexes and whether platform events need separate reporting paths. | Define approved metrics, privacy-safe aggregation, audit visibility, and support access controls. |
-| Expected data volume and query mix | Determines index selection, pagination strategy, archival, and embedding limits. | Establish expected tenant/record growth and validate indexes against representative query plans. |
+| Decision still open                                                     | Why the database design depends on it                                                                            | What must be decided before implementation                                                                                    |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Appointment capacity: staff-specific, service/resource-based, or hybrid | Determines required references/claims, conflict query predicates, availability indexes, and write serialization. | Select conceptual capacity model and define what makes two claims incompatible.                                               |
+| Which appointment states consume capacity                               | Determines conflict filters, capacity release, partial indexes, cancellation behavior.                           | Define capacity-consuming states and timing of hold/release.                                                                  |
+| Appointment lifecycle and allowed transitions                           | Determines status vocabulary, history shape, permitted mutations, and rescheduling link behavior.                | Approve lifecycle states, transitions, cancellation/reschedule/no-show policy.                                                |
+| Queue transitions, recall, skip, reopening, exceptional transitions     | Determines status validation, status history, active queue queries, and state-dependent indexing.                | Approve transition graph and actor permissions; initial six statuses remain as stated in SRS.                                 |
+| Guest verification and matching                                         | Determines ticket access/abuse protection and whether a submitted contact can be treated as verified.            | Define additional verification methods; only verified same-tenant contact may deduplicate profiles.                           |
+| Customer profile deduplication                                          | Determines unique indexes, user/profile cardinality, merge behavior, and privacy boundaries.                     | Decide profile-per-tenant policy and whether/how verified identifiers may deduplicate.                                        |
+| Feature setting granularity                                             | Embedded business settings fit current business-wide baseline; branch overrides change storage and precedence.   | Decide business-wide vs branch-specific effective setting and defaults. Guest/customer settings remain independent.           |
+| Membership uniqueness and lifecycle                                     | Determines unique index, reactivation/history strategy, and role representation.                                 | Confirm one durable membership per user/business, role combinations, invitations, removal, and last-owner rule.               |
+| MongoDB topology and transaction availability                           | Determines whether multi-document invariants can use transactions and how atomicity/retries are implemented.     | Select/verify deployment topology and transaction support before choosing booking and queue-join algorithm.                   |
+| Legal retention overrides and enforcement                               | Affects ticket cleanup, profiles, audit, backups, and jurisdictional compliance.                                 | Review proposed 12-month snapshot/24-month minimal event retention and define automated cleanup and backup deletion behavior. |
+| Token expiry and revocation                                             | Affects token fields, validation, cleanup indexes, and customer status availability.                             | Define token purposes, validity, reuse, rotation/revocation, and QR replacement policy.                                       |
+| Identity identifiers and uniqueness                                     | Determines account indexes and profile matching.                                                                 | Decide email/phone/other identifiers, normalization, verification, and uniqueness rules.                                      |
+| Branch/service/staff schedule granularity                               | Determines whether hours fit embedded bounded documents or need additional collections and indexes.              | Define recurring schedule, exceptions, branch overrides, and time-zone edge cases.                                            |
+| Platform analytics and audit visibility                                 | Determines aggregation/query indexes and whether platform events need separate reporting paths.                  | Define approved metrics, privacy-safe aggregation, audit visibility, and support access controls.                             |
+| Expected data volume and query mix                                      | Determines index selection, pagination strategy, archival, and embedding limits.                                 | Establish expected tenant/record growth and validate indexes against representative query plans.                              |
 
 ## Consistency Check Against Approved Baselines
 
-- SRS version 0.2 remains the requirements baseline; architecture version 0.1 remains the modular-monolith baseline.
+- SRS version 0.3 remains the requirements baseline; architecture version 0.1 remains the modular-monolith baseline.
 - The proposed collection set separates global users from tenant memberships and tenant customer profiles. Registered customers do not need memberships in every business.
 - Every tenant-owned collection includes `tenantId`; tenant references are required to be consistent. The business root uses its own `_id` as `tenantId`.
 - Appointment capacity alternatives and capacity-consuming states remain TBD. Interval overlap includes variable-duration services; ordinary indexes are not claimed to enforce it.
-- Queue tickets use only the initial status vocabulary from the SRS; transitions and queue scope/reset remain TBD.
+- Queue tickets use only the initial status vocabulary; transitions remain TBD. Independent queue scope is tenant/branch/service/local date, with date derived from branch timezone.
 - All eight tenant feature settings are represented; guest booking and customer accounts remain independent.
-- Sensitive public tokens are hash-only. Token verification, expiry, revocation, guest identity, and QR rotation remain TBD.
+- Sensitive public tokens are hash-only. Queue ticket access expires after seven days; QR rotation and legal retention overrides remain unresolved.
 - UTC instants, branch IANA timezone context, audit privacy, platform/tenant separation, and concurrency constraints align with the SRS and architecture.
-- MongoDB topology, transaction capability, retention periods, legal requirements, deployment details, and performance targets are not invented.
+- MongoDB topology, transaction capability, legal retention overrides, deployment details, and performance targets remain unresolved.
 
 No database schemas, API contracts, application code, or Mongoose model files are created by this document.

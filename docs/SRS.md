@@ -2,14 +2,16 @@
 
 ## Your Appointment
 
-| Document attribute | Value |
-|---|---|
-| Status | Reviewed requirements baseline; targeted revision |
-| Product | Your Appointment |
-| Version | 0.2 |
-| Last updated | 2026-11-11 |
+| Document attribute | Value                                                    |
+| ------------------ | -------------------------------------------------------- |
+| Status             | Reviewed requirements baseline; feature-upgrade revision |
+| Product            | Your Appointment                                         |
+| Version            | 0.3                                                      |
+| Last updated       | 2026-11-12                                               |
 
 **Revision note (0.2):** Clarifies appointment capacity and interval conflicts, initial queue statuses, tenant feature settings, basic platform administration, MVP analytics, and customer identity versus business membership. Existing approved product direction is preserved.
+
+**Revision note (0.3):** Adds independent service/room queues, explicit staff-to-service scope, live owner monitoring and activity history, guest-first queue entry with optional post-service profile consent, and minimum guest-ticket retention. Existing unresolved lifecycle and capacity policies remain unresolved.
 
 ### 1. Introduction
 
@@ -39,21 +41,21 @@ The MVP focuses on business setup, service and staff configuration, appointment 
 
 #### 1.5 Definitions and abbreviations
 
-| Term | Definition |
-|---|---|
-| Tenant / business | An independently managed business account and its organizational data. |
-| Tenant-owned record | A record created for or belonging to a business, such as a branch, service, staff assignment, appointment, or queue ticket. |
-| Membership | The relationship granting a user one or more tenant-level roles in a business. |
-| Branch | A physical or service location belonging to one business; it has its own address, timezone, settings, and operational schedules. |
-| Service | A bookable or queueable offering provided by a business, optionally at selected branches and by selected staff. |
-| Appointment | A reservation for a customer, service, branch, time, and (where applicable) staff member. |
-| Walk-in queue | An ordered set of customers awaiting service at a branch, generally associated with a service or queue configuration. |
-| Queue ticket | A customer's record and position in a walk-in queue, with a lifecycle from joining through service completion or exit. |
-| Feature setting | A tenant-configurable capability or policy that the backend must validate before allowing the related operation. |
-| IANA timezone | A canonical timezone identifier such as `Asia/Kolkata` used to interpret local branch schedules and display times. |
-| MVP | Minimum viable product: the first agreed usable release, limited to the capabilities in Section 11. |
-| TBD | To be decided by the product owner or stakeholders. |
-| UTC | Coordinated Universal Time, the standard for stored timestamps. |
+| Term                | Definition                                                                                                                       |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Tenant / business   | An independently managed business account and its organizational data.                                                           |
+| Tenant-owned record | A record created for or belonging to a business, such as a branch, service, staff assignment, appointment, or queue ticket.      |
+| Membership          | The relationship granting a user one or more tenant-level roles in a business.                                                   |
+| Branch              | A physical or service location belonging to one business; it has its own address, timezone, settings, and operational schedules. |
+| Service             | A bookable or queueable offering provided by a business, optionally at selected branches and by selected staff.                  |
+| Appointment         | A reservation for a customer, service, branch, time, and (where applicable) staff member.                                        |
+| Walk-in queue       | An ordered set of customers awaiting service at a branch, generally associated with a service or queue configuration.            |
+| Queue ticket        | A customer's record and position in a walk-in queue, with a lifecycle from joining through service completion or exit.           |
+| Feature setting     | A tenant-configurable capability or policy that the backend must validate before allowing the related operation.                 |
+| IANA timezone       | A canonical timezone identifier such as `Asia/Kolkata` used to interpret local branch schedules and display times.               |
+| MVP                 | Minimum viable product: the first agreed usable release, limited to the capabilities in Section 11.                              |
+| TBD                 | To be decided by the product owner or stakeholders.                                                                              |
+| UTC                 | Coordinated Universal Time, the standard for stored timestamps.                                                                  |
 
 ### 2. Overall Description
 
@@ -79,12 +81,12 @@ Appointment-based businesses may coordinate bookings and waiting lines through d
 
 #### 2.4 User classes and characteristics
 
-| User class | Characteristics and needs |
-|---|---|
+| User class             | Characteristics and needs                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Platform Administrator | Operates the SaaS platform through platform-level functions such as viewing and managing tenant accounts, monitoring aggregate platform usage, changing business activation state, and reviewing platform-level analytics. The role does not by itself grant access to private tenant or customer records; sensitive support access policy is TBD and must be explicitly authorized and auditable. |
-| Business Owner | Creates a business, configures tenant settings and branches, manages services and staff, and reviews operational information. May belong to more than one business. |
-| Staff Member | Works for one or more branches/businesses, sees only the operational information needed for assigned duties, and manages appointment or queue service actions permitted by membership. |
-| Customer | A person who books appointments or joins queues as a guest or through a registered customer account, and may view their own booking or queue status. Customer identity does not itself create a business membership. The same person may also hold owner or staff memberships. |
+| Business Owner         | Creates a business, configures tenant settings and branches, manages services and staff, and reviews operational information. May belong to more than one business.                                                                                                                                                                                                                                |
+| Staff Member           | Works for one or more branches/businesses, sees only the operational information needed for assigned duties, and manages appointment or queue service actions permitted by membership.                                                                                                                                                                                                             |
+| Customer               | A person who books appointments or joins queues as a guest or through a registered customer account, and may view their own booking or queue status. Customer identity does not itself create a business membership. The same person may also hold owner or staff memberships.                                                                                                                     |
 
 Users may have more than one user class over time. Tenant permissions are attached to a user's membership in a particular business, rather than inferred from a universal owner/staff role. A registered customer account can make bookings at businesses without a membership in each of them. Customer identity represents the person making a booking or queue entry; membership represents an authorized relationship with a business. Platform permissions are separate from tenant membership roles.
 
@@ -153,184 +155,193 @@ Priority meanings: **Must Have** is required for MVP; **Should Have** is valuabl
 
 #### 4.1 Authentication and account management
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-AUTH-001 | Register and sign in | Business Owner, Staff Member, Customer | The system shall allow a user to create an account and authenticate using the identity method selected for MVP. | Must Have |
-| FR-AUTH-002 | Protect credentials | All authenticated users | The system shall protect credential material and shall not return passwords or credential secrets in responses. | Must Have |
-| FR-AUTH-003 | Sign out and session/token handling | All authenticated users | The system shall provide the selected sign-out and credential/session invalidation behavior. Exact token lifecycle is TBD. | Must Have |
-| FR-AUTH-004 | Account recovery | All account holders | The system should provide a secure account recovery process using a verified channel. Channel and policy are TBD. | Should Have |
-| FR-AUTH-005 | Guest identity | Guest Customer | The system shall support the approved guest booking and queue flows without requiring a registered customer account. Verification and retention rules are TBD. | Must Have |
+| ID          | Description                         | Relevant actor                         | Expected behavior                                                                                                                                              | Priority    |
+| ----------- | ----------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-AUTH-001 | Register and sign in                | Business Owner, Staff Member, Customer | The system shall allow a user to create an account and authenticate using the identity method selected for MVP.                                                | Must Have   |
+| FR-AUTH-002 | Protect credentials                 | All authenticated users                | The system shall protect credential material and shall not return passwords or credential secrets in responses.                                                | Must Have   |
+| FR-AUTH-003 | Sign out and session/token handling | All authenticated users                | The system shall provide the selected sign-out and credential/session invalidation behavior. Exact token lifecycle is TBD.                                     | Must Have   |
+| FR-AUTH-004 | Account recovery                    | All account holders                    | The system should provide a secure account recovery process using a verified channel. Channel and policy are TBD.                                              | Should Have |
+| FR-AUTH-005 | Guest identity                      | Guest Customer                         | The system shall support the approved guest booking and queue flows without requiring a registered customer account. Verification and retention rules are TBD. | Must Have   |
 
 #### 4.2 Business self-registration and onboarding
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-ONB-001 | Self-register business | Business Owner | An authenticated or registering owner shall be able to submit required business details and create a business tenant. | Must Have |
-| FR-ONB-002 | Establish owner membership | Business Owner | On successful business creation, the initiating owner shall receive an owner membership for that business. | Must Have |
-| FR-ONB-003 | Guided setup status | Business Owner | The system should indicate which setup information is incomplete and what is needed to make a branch bookable/queueable. | Should Have |
-| FR-ONB-004 | Business profile maintenance | Business Owner | The owner shall be able to view and update permitted business profile information within the tenant. | Must Have |
+| ID         | Description                  | Relevant actor | Expected behavior                                                                                                        | Priority    |
+| ---------- | ---------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------- |
+| FR-ONB-001 | Self-register business       | Business Owner | An authenticated or registering owner shall be able to submit required business details and create a business tenant.    | Must Have   |
+| FR-ONB-002 | Establish owner membership   | Business Owner | On successful business creation, the initiating owner shall receive an owner membership for that business.               | Must Have   |
+| FR-ONB-003 | Guided setup status          | Business Owner | The system should indicate which setup information is incomplete and what is needed to make a branch bookable/queueable. | Should Have |
+| FR-ONB-004 | Business profile maintenance | Business Owner | The owner shall be able to view and update permitted business profile information within the tenant.                     | Must Have   |
 
 #### 4.3 Multi-tenant management
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-TEN-001 | Scope business data | All tenant users | Reads and writes of business-owned resources shall be constrained to a business the actor is authorized to access. | Must Have |
-| FR-TEN-002 | Resolve authorization from membership | Business Owner, Staff Member | The backend shall determine tenant authority from authenticated identity and membership, not a client-supplied tenant identifier. | Must Have |
-| FR-TEN-003 | Switch business context | User with multiple memberships | The user shall be able to select among businesses for which they have access; each action shall use the selected business's membership role. | Must Have |
-| FR-TEN-004 | Isolate tenant data | Platform Administrator, tenant users | Tenant data shall not be exposed or modified across business boundaries through APIs, searches, exports, or real-time channels. | Must Have |
-| FR-TEN-005 | Manage memberships | Business Owner | An authorized owner shall be able to add or remove business memberships as permitted by the finalized invitation and removal policy. | Should Have |
+| ID         | Description                           | Relevant actor                       | Expected behavior                                                                                                                            | Priority    |
+| ---------- | ------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-TEN-001 | Scope business data                   | All tenant users                     | Reads and writes of business-owned resources shall be constrained to a business the actor is authorized to access.                           | Must Have   |
+| FR-TEN-002 | Resolve authorization from membership | Business Owner, Staff Member         | The backend shall determine tenant authority from authenticated identity and membership, not a client-supplied tenant identifier.            | Must Have   |
+| FR-TEN-003 | Switch business context               | User with multiple memberships       | The user shall be able to select among businesses for which they have access; each action shall use the selected business's membership role. | Must Have   |
+| FR-TEN-004 | Isolate tenant data                   | Platform Administrator, tenant users | Tenant data shall not be exposed or modified across business boundaries through APIs, searches, exports, or real-time channels.              | Must Have   |
+| FR-TEN-005 | Manage memberships                    | Business Owner                       | An authorized owner shall be able to add or remove business memberships as permitted by the finalized invitation and removal policy.         | Should Have |
 
 #### 4.4 Business feature configuration
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-FEAT-001 | Configure supported features | Business Owner | The owner shall be able to configure tenant-controlled settings for appointments, walk-in queue, staff selection, service selection, guest booking, customer accounts, notifications, and multiple branches, subject to platform support and applicable policy. | Must Have |
-| FR-FEAT-002 | Enforce features on backend | All users | The backend shall validate the effective tenant-controlled setting before every operation it governs. Guest booking and customer accounts are independent settings; disabling one shall not implicitly disable the other. | Must Have |
-| FR-FEAT-003 | Communicate unavailable actions | Customer, Staff Member, Business Owner | When a feature is disabled or unavailable, the application shall present an understandable explanation and avoid implying the operation succeeded. | Should Have |
+| ID          | Description                     | Relevant actor                         | Expected behavior                                                                                                                                                                                                                                               | Priority    |
+| ----------- | ------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-FEAT-001 | Configure supported features    | Business Owner                         | The owner shall be able to configure tenant-controlled settings for appointments, walk-in queue, staff selection, service selection, guest booking, customer accounts, notifications, and multiple branches, subject to platform support and applicable policy. | Must Have   |
+| FR-FEAT-002 | Enforce features on backend     | All users                              | The backend shall validate the effective tenant-controlled setting before every operation it governs. Guest booking and customer accounts are independent settings; disabling one shall not implicitly disable the other.                                       | Must Have   |
+| FR-FEAT-003 | Communicate unavailable actions | Customer, Staff Member, Business Owner | When a feature is disabled or unavailable, the application shall present an understandable explanation and avoid implying the operation succeeded.                                                                                                              | Should Have |
 
 #### 4.5 Branch management
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-BR-001 | Create branch | Business Owner | An owner shall create a branch under the current business with required identifying and location details. | Must Have |
-| FR-BR-002 | Configure branch timezone and hours | Business Owner | An owner shall set an IANA timezone and operating hours for a branch; invalid or missing timezone data shall be rejected. | Must Have |
-| FR-BR-003 | Update or deactivate branch | Business Owner | An owner shall update branch details or deactivate a branch subject to rules protecting existing bookings and queue activity. Exact deactivation behavior is TBD. | Should Have |
-| FR-BR-004 | Select branch | Customer, Staff Member, Business Owner | Users shall be able to select or resolve an active branch for supported booking and queue operations. | Must Have |
+| ID        | Description                         | Relevant actor                         | Expected behavior                                                                                                                                                 | Priority    |
+| --------- | ----------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-BR-001 | Create branch                       | Business Owner                         | An owner shall create a branch under the current business with required identifying and location details.                                                         | Must Have   |
+| FR-BR-002 | Configure branch timezone and hours | Business Owner                         | An owner shall set an IANA timezone and operating hours for a branch; invalid or missing timezone data shall be rejected.                                         | Must Have   |
+| FR-BR-003 | Update or deactivate branch         | Business Owner                         | An owner shall update branch details or deactivate a branch subject to rules protecting existing bookings and queue activity. Exact deactivation behavior is TBD. | Should Have |
+| FR-BR-004 | Select branch                       | Customer, Staff Member, Business Owner | Users shall be able to select or resolve an active branch for supported booking and queue operations.                                                             | Must Have   |
 
 #### 4.6 Service management
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-SVC-001 | Create and maintain service | Business Owner | An owner shall create, view, update, and deactivate a business service with its name and required operational details. | Must Have |
-| FR-SVC-002 | Configure service availability | Business Owner | An owner shall associate a service with eligible branches and, where applicable, staff and booking/queue capabilities. | Must Have |
-| FR-SVC-003 | Publish eligible service choices | Customer | The booking or queue flow shall list only active services available at the selected branch and enabled for the requested flow. | Must Have |
-| FR-SVC-004 | Define duration and buffers | Business Owner | An owner shall configure service duration and any supported buffer policy used for availability. Buffer policy details are TBD. | Must Have |
+| ID         | Description                      | Relevant actor | Expected behavior                                                                                                               | Priority  |
+| ---------- | -------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-SVC-001 | Create and maintain service      | Business Owner | An owner shall create, view, update, and deactivate a business service with its name and required operational details.          | Must Have |
+| FR-SVC-002 | Configure service availability   | Business Owner | An owner shall associate a service with eligible branches and, where applicable, staff and booking/queue capabilities.          | Must Have |
+| FR-SVC-003 | Publish eligible service choices | Customer       | The booking or queue flow shall list only active services available at the selected branch and enabled for the requested flow.  | Must Have |
+| FR-SVC-004 | Define duration and buffers      | Business Owner | An owner shall configure service duration and any supported buffer policy used for availability. Buffer policy details are TBD. | Must Have |
 
 #### 4.7 Staff management
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-STAFF-001 | Add staff member | Business Owner | An owner shall associate an existing or invited user with a business as staff, subject to the membership policy. | Must Have |
-| FR-STAFF-002 | Assign staff scope | Business Owner | An owner shall assign staff to permitted branches and services; staff views and actions shall respect those assignments. | Must Have |
-| FR-STAFF-003 | Update or remove staff membership | Business Owner | An owner shall change or end a staff membership, subject to protection of audit history and existing work. | Should Have |
-| FR-STAFF-004 | Staff operational identity | Staff Member | The system shall identify the staff member responsible for an appointment or queue action when that information is collected. | Should Have |
+| ID           | Description                       | Relevant actor | Expected behavior                                                                                                             | Priority    |
+| ------------ | --------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-STAFF-001 | Add staff member                  | Business Owner | An owner shall associate an existing or invited user with a business as staff, subject to the membership policy.              | Must Have   |
+| FR-STAFF-002 | Assign staff scope                | Business Owner | An owner shall assign staff to permitted branches and services; staff views and actions shall respect those assignments.      | Must Have   |
+| FR-STAFF-003 | Update or remove staff membership | Business Owner | An owner shall change or end a staff membership, subject to protection of audit history and existing work.                    | Should Have |
+| FR-STAFF-004 | Staff operational identity        | Staff Member   | The system shall identify the staff member responsible for an appointment or queue action when that information is collected. | Should Have |
 
 #### 4.8 Staff schedules and working hours
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-SCH-001 | Configure working schedule | Business Owner | An owner shall configure recurring working hours for applicable branches, services, or staff. Exact schedule granularity is TBD. | Must Have |
-| FR-SCH-002 | Configure exceptions | Business Owner | The system should support date-specific closures or availability exceptions used to prevent inappropriate offered times. | Should Have |
-| FR-SCH-003 | Display local operating time | Customer, Staff Member | Schedule input and display shall be interpreted in the branch IANA timezone and persisted as UTC instants where an instant is represented. | Must Have |
+| ID         | Description                  | Relevant actor         | Expected behavior                                                                                                                          | Priority    |
+| ---------- | ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------- |
+| FR-SCH-001 | Configure working schedule   | Business Owner         | An owner shall configure recurring working hours for applicable branches, services, or staff. Exact schedule granularity is TBD.           | Must Have   |
+| FR-SCH-002 | Configure exceptions         | Business Owner         | The system should support date-specific closures or availability exceptions used to prevent inappropriate offered times.                   | Should Have |
+| FR-SCH-003 | Display local operating time | Customer, Staff Member | Schedule input and display shall be interpreted in the branch IANA timezone and persisted as UTC instants where an instant is represented. | Must Have   |
 
 #### 4.9 Appointment booking
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-APT-001 | Find bookable appointment times | Customer | The system shall present available times for an active branch/service using configured schedules, duration, and existing reservations. | Must Have |
-| FR-APT-002 | Book as guest or account holder | Customer | A customer shall be able to submit an appointment request as a guest or authenticated user with the required customer and booking details. | Must Have |
-| FR-APT-003 | Confirm appointment | Customer | The system shall create and return a booking confirmation only after the reservation is successfully committed. | Must Have |
-| FR-APT-004 | Prevent overlapping reservations | All users | The system shall detect overlapping time intervals, including for variable-duration services, and ensure two reservations do not consume the same incompatible capacity simultaneously, including under concurrent requests. Capacity may be staff-specific, service/resource-based, or hybrid; the product owner has not selected a model. | Must Have |
-| FR-APT-005 | View own appointment | Customer | An authenticated customer or a guest using the approved verification method shall be able to retrieve only their own appointment information. | Must Have |
-| FR-APT-006 | Manage appointment status | Business Owner, Staff Member | Authorized business users shall be able to view and update appointments within their tenant and assigned operational scope. | Must Have |
+| ID         | Description                      | Relevant actor               | Expected behavior                                                                                                                                                                                                                                                                                                                           | Priority  |
+| ---------- | -------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-APT-001 | Find bookable appointment times  | Customer                     | The system shall present available times for an active branch/service using configured schedules, duration, and existing reservations.                                                                                                                                                                                                      | Must Have |
+| FR-APT-002 | Book as guest or account holder  | Customer                     | A customer shall be able to submit an appointment request as a guest or authenticated user with the required customer and booking details.                                                                                                                                                                                                  | Must Have |
+| FR-APT-003 | Confirm appointment              | Customer                     | The system shall create and return a booking confirmation only after the reservation is successfully committed.                                                                                                                                                                                                                             | Must Have |
+| FR-APT-004 | Prevent overlapping reservations | All users                    | The system shall detect overlapping time intervals, including for variable-duration services, and ensure two reservations do not consume the same incompatible capacity simultaneously, including under concurrent requests. Capacity may be staff-specific, service/resource-based, or hybrid; the product owner has not selected a model. | Must Have |
+| FR-APT-005 | View own appointment             | Customer                     | An authenticated customer or a guest using the approved verification method shall be able to retrieve only their own appointment information.                                                                                                                                                                                               | Must Have |
+| FR-APT-006 | Manage appointment status        | Business Owner, Staff Member | Authorized business users shall be able to view and update appointments within their tenant and assigned operational scope.                                                                                                                                                                                                                 | Must Have |
 
 #### 4.10 Appointment cancellation and rescheduling
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-APT-007 | Cancel appointment | Customer, Business Owner, Staff Member | An authorized actor shall cancel an eligible appointment; the system shall record the state change and update availability. Cancellation window and reason policy are TBD. | Must Have |
-| FR-APT-008 | Reschedule appointment | Customer, Business Owner, Staff Member | An authorized actor should move an eligible appointment to an available time without creating a conflicting reservation. | Should Have |
-| FR-APT-009 | Communicate booking changes | Customer | The system shall show the resulting appointment state and any configured confirmation or cancellation information. External delivery channel is TBD. | Must Have |
+| ID         | Description                 | Relevant actor                         | Expected behavior                                                                                                                                                          | Priority    |
+| ---------- | --------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-APT-007 | Cancel appointment          | Customer, Business Owner, Staff Member | An authorized actor shall cancel an eligible appointment; the system shall record the state change and update availability. Cancellation window and reason policy are TBD. | Must Have   |
+| FR-APT-008 | Reschedule appointment      | Customer, Business Owner, Staff Member | An authorized actor should move an eligible appointment to an available time without creating a conflicting reservation.                                                   | Should Have |
+| FR-APT-009 | Communicate booking changes | Customer                               | The system shall show the resulting appointment state and any configured confirmation or cancellation information. External delivery channel is TBD.                       | Must Have   |
 
 #### 4.11 QR code generation
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-QR-001 | Generate branch queue QR entry point | Business Owner | An owner shall obtain a QR code or printable representation that directs customers to the intended active branch queue flow. | Must Have |
-| FR-QR-002 | Protect QR-linked access | All users | The QR destination shall expose only information needed to start the public flow and shall not grant access to private tenant or customer data. | Must Have |
-| FR-QR-003 | Revoke or rotate QR access | Business Owner | The system should allow invalidation or rotation of a sensitive QR-linked token when required. Token lifecycle details are TBD. | Should Have |
+| ID        | Description                          | Relevant actor | Expected behavior                                                                                                                               | Priority    |
+| --------- | ------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-QR-001 | Generate branch queue QR entry point | Business Owner | An owner shall obtain a QR code or printable representation that directs customers to the intended active branch queue flow.                    | Must Have   |
+| FR-QR-002 | Protect QR-linked access             | All users      | The QR destination shall expose only information needed to start the public flow and shall not grant access to private tenant or customer data. | Must Have   |
+| FR-QR-003 | Revoke or rotate QR access           | Business Owner | The system should allow invalidation or rotation of a sensitive QR-linked token when required. Token lifecycle details are TBD.                 | Should Have |
 
 #### 4.12 Walk-in queue joining
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-QUEUE-001 | Join queue from QR flow | Guest Customer, Customer | A customer shall be able to open the branch QR destination, select an available queue/service where needed, provide required details, and request a ticket. | Must Have |
-| FR-QUEUE-002 | Join as guest or account holder | Customer | Queue entry shall support guest and authenticated customers without exposing customer details to other queue participants. | Must Have |
-| FR-QUEUE-003 | Reject unavailable queue | Customer | The system shall clearly reject queue entry when the branch or relevant queue is closed, disabled, or otherwise unable to accept entries. | Must Have |
-| FR-QUEUE-004 | Prevent duplicate or abusive entry | Customer | The system should apply the approved duplicate-entry and abuse-control policy. Limits and verification rules are TBD. | Should Have |
+| ID           | Description                        | Relevant actor           | Expected behavior                                                                                                                                                                                                             | Priority    |
+| ------------ | ---------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-QUEUE-001 | Join queue from QR flow            | Guest Customer, Customer | A customer shall be able to open the branch QR destination, select the intended service/room, provide their name, and request a ticket without signing in or providing email. Email, phone, and account/sign-in are optional. | Must Have   |
+| FR-QUEUE-002 | Join as guest or account holder    | Customer                 | Queue entry shall support guest and authenticated customers without exposing customer details to other queue participants.                                                                                                    | Must Have   |
+| FR-QUEUE-003 | Reject unavailable queue           | Customer                 | The system shall clearly reject queue entry when the branch or relevant queue is closed, disabled, or otherwise unable to accept entries.                                                                                     | Must Have   |
+| FR-QUEUE-004 | Prevent duplicate or abusive entry | Customer                 | The system should apply the approved duplicate-entry and abuse-control policy. Limits and verification rules are TBD.                                                                                                         | Should Have |
 
 #### 4.13 Queue ticket management
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-QUEUE-005 | Allocate ordered ticket | Customer | On successful queue join, the system shall allocate a queue sequence atomically within the correct branch and queue scope and return a ticket reference. | Must Have |
-| FR-QUEUE-006 | View operational queue | Staff Member, Business Owner | Authorized business users shall see the active queue and the information needed to serve it, scoped to their membership and branch assignments. | Must Have |
-| FR-QUEUE-007 | Advance ticket lifecycle | Staff Member, Business Owner | Authorized users shall manage a ticket using the initial status vocabulary WAITING, CALLED, SERVING, COMPLETED, NO_SHOW, and CANCELLED. Allowed transitions and exceptional transitions remain TBD. | Must Have |
-| FR-QUEUE-008 | Record ticket actions | Staff Member, Business Owner | The system shall record relevant queue state changes and their timestamps; actor attribution is required where an authenticated actor performs the action. | Must Have |
-| FR-QUEUE-009 | Skip or recall ticket | Staff Member, Business Owner | The system's policy for skipping or recalling a ticket requires further specification; this requirement does not establish a transition or authorize either action before that policy is approved. | Should Have |
+| ID           | Description                        | Relevant actor                         | Expected behavior                                                                                                                                                                                                                                                                                                     | Priority    |
+| ------------ | ---------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-QUEUE-005 | Allocate ordered ticket            | Customer                               | On successful queue join, the system shall allocate a queue sequence atomically within tenant, branch, service/room, and branch-local business-day scope and return a ticket reference.                                                                                                                               | Must Have   |
+| FR-QUEUE-006 | View operational queue             | Staff Member, Business Owner           | Authorized business users shall see the active queue and the information needed to serve it, scoped to their membership and branch assignments.                                                                                                                                                                       | Must Have   |
+| FR-QUEUE-007 | Advance ticket lifecycle           | Staff Member, Business Owner           | Authorized users shall manage a ticket using the initial status vocabulary WAITING, CALLED, SERVING, COMPLETED, NO_SHOW, and CANCELLED. Allowed transitions and exceptional transitions remain TBD.                                                                                                                   | Must Have   |
+| FR-QUEUE-008 | Record ticket actions              | Staff Member, Business Owner           | The system shall record relevant queue state changes and their timestamps; actor attribution is required where an authenticated actor performs the action.                                                                                                                                                            | Must Have   |
+| FR-QUEUE-009 | Skip or recall ticket              | Staff Member, Business Owner           | The system's policy for skipping or recalling a ticket requires further specification; this requirement does not establish a transition or authorize either action before that policy is approved.                                                                                                                    | Should Have |
+| FR-QUEUE-010 | Operate independent service queues | Customer, Staff Member, Business Owner | Each active queue-enabled service/room at a branch shall have an independent queue and sequence for each branch-local business day. Ticket numbers may repeat across services. The active room must be unmistakable in customer and staff views.                                                                      | Must Have   |
+| FR-QUEUE-011 | Scope queue operations to a room   | Staff Member, Business Owner           | Queue lists and call-next operations shall be filtered to the selected branch and service. A staff action shall not change another service's queue. Backend authorization shall enforce the staff member's active branch and service assignment.                                                                      | Must Have   |
+| FR-QUEUE-012 | Prevent duplicate ticket claims    | Staff Member, Business Owner           | Concurrent calls or state changes shall conditionally claim a ticket so one ticket cannot be called or advanced by two staff actions at once.                                                                                                                                                                         | Must Have   |
+| FR-QUEUE-013 | Offer voluntary queue exit         | Customer                               | A customer using their secure ticket access shall be able to leave while eligible; the ticket becomes CANCELLED and the server records the UTC time.                                                                                                                                                                  | Must Have   |
+| FR-QUEUE-014 | Save a profile only by consent     | Customer                               | After ticket completion, a customer may explicitly opt in to create or associate a business-scoped customer profile. Declining completes the journey normally. Anonymous queue entry shall not create a persistent profile. Reuse a profile only when a verified matching contact detail exists in the same business. | Must Have   |
+| FR-QUEUE-015 | Record immutable queue event times | Staff Member, Business Owner, Customer | Ticket creation, call, service start, completion, cancellation, and no-show shall append timestamped event history without overwriting prior event times; authenticated staff actions identify the actor.                                                                                                             | Must Have   |
 
 #### 4.14 Live queue tracking
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-LIVE-001 | Subscribe to own queue status | Customer | A customer shall be able to view the current status of their queue ticket using an approved, limited-access reference. | Must Have |
-| FR-LIVE-002 | Publish queue changes in real time | Customer, Staff Member, Business Owner | Authorized clients shall receive timely Socket.IO updates when relevant queue state changes occur. | Must Have |
-| FR-LIVE-003 | Scope real-time delivery | All users | The backend shall authenticate or otherwise validate subscriptions and scope each event to the correct business, branch, queue, and permitted audience. | Must Have |
-| FR-LIVE-004 | Recover from lost connection | Customer, Staff Member, Business Owner | On connection loss or missed events, the client shall be able to retrieve current authorized state and resume updates without assuming events were received. | Must Have |
+| ID          | Description                        | Relevant actor                         | Expected behavior                                                                                                                                            | Priority  |
+| ----------- | ---------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| FR-LIVE-001 | Subscribe to own queue status      | Customer                               | A customer shall be able to view the current status of their queue ticket using an approved, limited-access reference.                                       | Must Have |
+| FR-LIVE-002 | Publish queue changes in real time | Customer, Staff Member, Business Owner | Authorized clients shall receive timely Socket.IO updates when relevant queue state changes occur.                                                           | Must Have |
+| FR-LIVE-003 | Scope real-time delivery           | All users                              | The backend shall authenticate or otherwise validate subscriptions and scope each event to the correct business, branch, queue, and permitted audience.      | Must Have |
+| FR-LIVE-004 | Recover from lost connection       | Customer, Staff Member, Business Owner | On connection loss or missed events, the client shall be able to retrieve current authorized state and resume updates without assuming events were received. | Must Have |
 
 #### 4.15 Customer notifications
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-NOTIF-001 | Show in-product booking and queue status | Customer | The system shall show booking confirmation and current queue status in the relevant web flow. | Must Have |
-| FR-NOTIF-002 | Send external notifications | Customer | The system could send confirmations or reminders through a selected provider/channel if approved. Provider, channel, consent, and delivery scope are TBD. | Could Have |
-| FR-NOTIF-003 | Control notification content | Business Owner, Customer | If external notifications are introduced, content and recipient selection shall avoid disclosing unnecessary sensitive information. | Should Have |
+| ID           | Description                              | Relevant actor           | Expected behavior                                                                                                                                         | Priority    |
+| ------------ | ---------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-NOTIF-001 | Show in-product booking and queue status | Customer                 | The system shall show booking confirmation and current queue status in the relevant web flow.                                                             | Must Have   |
+| FR-NOTIF-002 | Send external notifications              | Customer                 | The system could send confirmations or reminders through a selected provider/channel if approved. Provider, channel, consent, and delivery scope are TBD. | Could Have  |
+| FR-NOTIF-003 | Control notification content             | Business Owner, Customer | If external notifications are introduced, content and recipient selection shall avoid disclosing unnecessary sensitive information.                       | Should Have |
 
 #### 4.16 Owner dashboard
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
+| ID          | Description                      | Relevant actor | Expected behavior                                                                                                                          | Priority  |
+| ----------- | -------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
 | FR-DASH-001 | View business operations summary | Business Owner | An owner shall view current or selected-period appointments and queue activity for authorized branches. Exact metrics and filters are TBD. | Must Have |
-| FR-DASH-002 | Navigate setup and operations | Business Owner | The dashboard shall provide access to authorized business setup and operational functions. | Must Have |
+| FR-DASH-002 | Navigate setup and operations    | Business Owner | The dashboard shall provide access to authorized business setup and operational functions.                                                 | Must Have |
 
 #### 4.17 Staff dashboard
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-DASH-003 | View assigned work | Staff Member | Staff shall see appointments and queues relevant to their authorized business and branch/service assignments. | Must Have |
-| FR-DASH-004 | Perform queue and appointment actions | Staff Member | The dashboard shall expose only actions permitted by the staff member's current membership and assignments. | Must Have |
+| ID          | Description                           | Relevant actor | Expected behavior                                                                                                                                                                                                                                        | Priority  |
+| ----------- | ------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-DASH-003 | View assigned work                    | Staff Member   | Staff shall see appointments and queues relevant to their authorized business and branch/service assignments.                                                                                                                                            | Must Have |
+| FR-DASH-004 | Perform queue and appointment actions | Staff Member   | The dashboard shall expose only actions permitted by the staff member's current membership and assignments.                                                                                                                                              | Must Have |
+| FR-DASH-005 | Monitor live rooms                    | Business Owner | An owner shall monitor all active queue rooms at a selected branch, including waiting count, current ticket state, safe customer display name, timestamps, assigned staff, and current workload; switching branches and real-time updates are supported. | Must Have |
 
 #### 4.18 Customer portal
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-PORT-001 | Review own appointments | Customer | An authenticated customer shall be able to see their own upcoming and prior appointments within the retention policy. | Should Have |
-| FR-PORT-002 | Review own queue tickets | Customer | A customer shall be able to retrieve current ticket status through an authenticated account or approved guest reference. | Must Have |
-| FR-PORT-003 | Update own profile | Customer | An authenticated customer should be able to update permitted profile details. Exact fields and verification rules are TBD. | Could Have |
+| ID          | Description                    | Relevant actor | Expected behavior                                                                                                                                                                                                       | Priority    |
+| ----------- | ------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| FR-PORT-001 | Review own appointments        | Customer       | An authenticated customer shall be able to see their own upcoming and prior appointments within the retention policy.                                                                                                   | Should Have |
+| FR-PORT-002 | Review own queue tickets       | Customer       | A customer shall be able to retrieve current ticket status through an authenticated account or approved guest reference.                                                                                                | Must Have   |
+| FR-PORT-003 | Update own profile             | Customer       | An authenticated customer should be able to update permitted profile details. Exact fields and verification rules are TBD.                                                                                              | Could Have  |
+| FR-PORT-004 | Review or leave a guest ticket | Guest Customer | A guest shall be able to open their own status using a secure unguessable ticket credential without a customer account, and may leave while eligible. Other customers' data and internal staff details are not exposed. | Must Have   |
 
 #### 4.19 Analytics
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-AN-001 | View basic operational counts | Business Owner | The owner shall be able to review agreed basic appointment and queue counts for the business and authorized branches, scoped to that business. Metric definitions and date-range semantics are TBD. | Must Have |
-| FR-AN-002 | Scope business analytics by tenant | Business Owner | Business analytics shall be scoped to the requesting owner's authorized business and shall not include another tenant's data. | Must Have |
+| ID        | Description                          | Relevant actor         | Expected behavior                                                                                                                                                                                                                                               | Priority  |
+| --------- | ------------------------------------ | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-AN-001 | View basic operational counts        | Business Owner         | The owner shall be able to review agreed basic appointment and queue counts for the business and authorized branches, scoped to that business. Metric definitions and date-range semantics are TBD.                                                             | Must Have |
+| FR-AN-002 | Scope business analytics by tenant   | Business Owner         | Business analytics shall be scoped to the requesting owner's authorized business and shall not include another tenant's data.                                                                                                                                   | Must Have |
 | FR-AN-003 | Monitor platform usage and analytics | Platform Administrator | The platform administrator shall be able to monitor platform usage and review platform-level analytics for platform operations, with detail and aggregation levels defined by policy. This does not authorize unrestricted private tenant/customer data access. | Must Have |
 
 #### 4.20 Platform administration
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-ADMIN-001 | View registered businesses | Platform Administrator | The system shall allow an authorized platform administrator to view registered business accounts and their platform-level status. | Must Have |
-| FR-ADMIN-002 | Manage tenant activation | Platform Administrator | The system shall allow an authorized platform administrator to manage tenant account records and suspend or activate a business, with action auditability. Detailed suspension effects are TBD. | Must Have |
-| FR-ADMIN-003 | Protect tenant operations from global role leakage | Platform Administrator | Platform-level privileges shall not be treated as tenant owner membership; tenant actions shall use explicit, auditable platform policy where allowed. Sensitive support access policy is TBD. | Must Have |
+| ID           | Description                                        | Relevant actor         | Expected behavior                                                                                                                                                                               | Priority  |
+| ------------ | -------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-ADMIN-001 | View registered businesses                         | Platform Administrator | The system shall allow an authorized platform administrator to view registered business accounts and their platform-level status.                                                               | Must Have |
+| FR-ADMIN-002 | Manage tenant activation                           | Platform Administrator | The system shall allow an authorized platform administrator to manage tenant account records and suspend or activate a business, with action auditability. Detailed suspension effects are TBD. | Must Have |
+| FR-ADMIN-003 | Protect tenant operations from global role leakage | Platform Administrator | Platform-level privileges shall not be treated as tenant owner membership; tenant actions shall use explicit, auditable platform policy where allowed. Sensitive support access policy is TBD.  | Must Have |
 
 #### 4.21 Audit logging
 
-| ID | Description | Relevant actor | Expected behavior | Priority |
-|---|---|---|---|---|
-| FR-AUD-001 | Record security-sensitive actions | Business Owner, Staff Member, Platform Administrator | The system shall record significant authorization, membership, configuration, and operational state changes with actor, tenant context where applicable, action, and time. | Must Have |
-| FR-AUD-002 | Restrict audit access | Business Owner, Platform Administrator | Audit records shall be readable only by roles with an approved need and shall not be editable through ordinary application flows. Retention and visibility policy are TBD. | Must Have |
-| FR-AUD-003 | Avoid sensitive audit content | All users | Audit logs shall not contain passwords, plaintext sensitive tokens, or unnecessary private customer details. | Must Have |
+| ID         | Description                       | Relevant actor                                       | Expected behavior                                                                                                                                                                                               | Priority  |
+| ---------- | --------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| FR-AUD-001 | Record security-sensitive actions | Business Owner, Staff Member, Platform Administrator | The system shall record significant authorization, membership, configuration, and operational state changes with actor, tenant context where applicable, action, and time.                                      | Must Have |
+| FR-AUD-002 | Restrict audit access             | Business Owner, Platform Administrator               | Audit records shall be readable only by roles with an approved need and shall not be editable through ordinary application flows. Retention and visibility policy are TBD.                                      | Must Have |
+| FR-AUD-003 | Avoid sensitive audit content     | All users                                            | Audit logs shall not contain passwords, plaintext sensitive tokens, or unnecessary private customer details.                                                                                                    | Must Have |
+| FR-AUD-004 | Review queue activity             | Business Owner                                       | An owner shall review chronological queue events for an authorized branch, with branch-local display time, room, ticket number, customer display name or anonymous label, action, actor, and relevant duration. | Must Have |
 
 ### 5. Detailed User Workflows
 
@@ -385,10 +396,11 @@ These workflows describe expected outcomes. Screens, exact field lists, and poli
 
 1. The customer scans the QR code displayed by a business at a branch.
 2. The device opens a public web page identifying the relevant business/branch and available queue options without exposing private records.
-3. The customer selects a service/queue if required and enters the minimum required details as a guest or signed-in user.
+3. The customer selects the intended service/room and provides a name. Email, phone, and account/sign-in are optional; a single available service is shown without a redundant choice step.
 4. The backend checks branch and tenant feature availability, validates input, and applies abuse/duplicate-entry rules.
 5. The system atomically allocates a sequence and creates a queue ticket.
-6. The customer receives a limited-access ticket reference and current status.
+6. The customer receives a limited-access ticket reference, service/room name, ticket number, and current status.
+7. Guest entry creates no persistent customer profile. After completion, an explicit optional profile-save action is offered.
 
 #### 5.7 Customer tracking queue position
 
@@ -401,8 +413,8 @@ These workflows describe expected outcomes. Screens, exact field lists, and poli
 #### 5.8 Staff calling and serving customers
 
 1. A staff member signs in and selects an authorized business/branch context.
-2. The staff dashboard displays the active queue within the member's assignment scope.
-3. The staff member selects an eligible WAITING ticket and invokes the call action; if allowed by the eventual transition policy, the ticket moves to CALLED.
+2. The staff dashboard displays only the selected service/room queue within the member's branch and service assignment.
+3. The staff member selects an eligible WAITING ticket and invokes the call action; a conditional backend update prevents two staff members claiming the same ticket.
 4. The backend verifies authorization and ticket state, records the transition, and publishes a privacy-safe update to authorized subscribers.
 5. The staff member marks the customer as serving when service begins, moving the ticket to SERVING if that transition is allowed by the final lifecycle policy.
 
@@ -414,7 +426,21 @@ These workflows describe expected outcomes. Screens, exact field lists, and poli
 4. The system publishes the updated public-safe status and refreshes operational views.
 5. The ticket remains available according to the approved business and audit retention policies.
 
-#### 5.10 Managing multiple businesses
+#### 5.10 Owner monitors live rooms and queue activity
+
+1. The owner selects a branch and opens Live Rooms.
+2. The system shows one card for each active queue-enabled room, with waiting count, current ticket and state, customer display name, staff attribution, and event times.
+3. Authorized queue and staff-assignment changes refresh the monitor through Socket.IO; the backend response remains authoritative.
+4. The owner opens Activity Log to review chronological status events displayed in the branch timezone. The log is tenant and branch scoped.
+
+#### 5.11 Customer opts in to a business profile after service
+
+1. After a ticket reaches COMPLETED, the guest is offered an optional profile-save action.
+2. The customer explicitly confirms consent and may provide optional contact details.
+3. If accepted, the backend creates or associates a same-business profile and records the consent time. A verified matching contact is reused where available.
+4. If declined, the ticket remains complete and no new customer profile is created.
+
+#### 5.12 Managing multiple businesses
 
 1. A user signs in and requests their accessible business list.
 2. The system returns only businesses for which the user has an active membership or explicitly authorized platform scope.
@@ -425,22 +451,25 @@ These workflows describe expected outcomes. Screens, exact field lists, and poli
 
 ### 6. Business Rules
 
-| ID | Rule |
-|---|---|
-| BR-001 Tenant isolation | Every business-owned record is associated with a tenant. All reads, writes, searches, exports, and real-time events are tenant-scoped. A request's client-supplied tenant ID cannot grant access. |
-| BR-002 Membership authorization | Tenant roles and permissions derive from a membership between a user and a business. A registered customer account identifies the person booking or joining a queue and does not require membership in each business. One user's role in one business does not imply a role in another; the same person may be both a customer and an owner or staff member where they hold the relevant membership. |
-| BR-003 Global and tenant authority | Platform-level permissions and tenant membership permissions are distinct. Platform authority does not silently create owner membership or ordinary tenant access. |
-| BR-004 Guest booking | Guest flows are supported for appointments and queues. The minimum collected information, identity verification, duplicate rules, lookup method, and retention period remain TBD. |
-| BR-005 Feature enforcement | Initial tenant-controlled features are appointments, walk-in queue, staff selection, service selection, guest booking, customer accounts, notifications, and multiple branches. The backend validates the effective tenant setting before a controlled operation. Guest booking and customer accounts are independent settings; disabling either does not implicitly disable the other. |
-| BR-006 Appointment availability and capacity | Offered times reflect applicable branch hours, service duration, schedules, exceptions, and existing reservations. The conceptual capacity model remains TBD: staff-specific reservations, service/resource capacity reservations, or a hybrid assignment. No option is selected by this SRS. |
-| BR-007 Appointment conflict prevention | The system detects overlapping reservation intervals, including variable-duration services, and prevents two reservations from consuming the same incompatible capacity simultaneously, including under concurrent requests. Which appointment states consume capacity is a future policy decision and remains TBD. |
-| BR-008 Queue sequence allocation | Sequence allocation is atomic and scoped to the applicable branch and queue. Parallel joins must not receive conflicting sequence assignments where uniqueness is required. Reset cadence and numbering presentation are TBD. |
-| BR-009 Queue ticket lifecycle | Initial status vocabulary is WAITING, CALLED, SERVING, COMPLETED, NO_SHOW, and CANCELLED. Allowed transitions, recall, skipping, reopening, and other exceptional transitions require further specification and remain TBD. |
-| BR-010 Waiting-time estimate | An estimate, if shown, is informational and shall be based on available queue/service data. Estimation method, confidence language, and whether MVP includes estimates are TBD. |
-| BR-011 Branch time | Branch operating schedules use an IANA timezone. Persisted instants use UTC; local dates/times are interpreted with the branch timezone, including daylight-saving transitions where applicable. |
-| BR-012 QR security | A QR code is a public entry point, not an authorization credential for private data. Sensitive QR-linked token material is stored as a hash, and rotation/revocation policy is TBD. |
-| BR-013 Customer privacy | Public pages and queue events disclose only the minimum information needed to identify status, and do not reveal another customer's personal details. |
-| BR-014 Auditability | Security-sensitive and important operational changes are attributable and timestamped, without placing secret or unnecessary personal data in audit records. |
+| ID                                           | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BR-001 Tenant isolation                      | Every business-owned record is associated with a tenant. All reads, writes, searches, exports, and real-time events are tenant-scoped. A request's client-supplied tenant ID cannot grant access.                                                                                                                                                                                                                                        |
+| BR-002 Membership authorization              | Tenant roles and permissions derive from a membership between a user and a business. A registered customer account identifies the person booking or joining a queue and does not require membership in each business. One user's role in one business does not imply a role in another; the same person may be both a customer and an owner or staff member where they hold the relevant membership.                                     |
+| BR-003 Global and tenant authority           | Platform-level permissions and tenant membership permissions are distinct. Platform authority does not silently create owner membership or ordinary tenant access.                                                                                                                                                                                                                                                                       |
+| BR-004 Guest booking                         | Guest flows are supported for appointments and queues. Queue entry requires a name; email, phone, and sign-in are optional. Queue tickets use a secure scoped credential. Appointment verification and guest abuse/duplicate rules remain TBD. Queue retention follows BR-017.                                                                                                                                                           |
+| BR-005 Feature enforcement                   | Initial tenant-controlled features are appointments, walk-in queue, staff selection, service selection, guest booking, customer accounts, notifications, and multiple branches. The backend validates the effective tenant setting before a controlled operation. Guest booking and customer accounts are independent settings; disabling either does not implicitly disable the other.                                                  |
+| BR-006 Appointment availability and capacity | Offered times reflect applicable branch hours, service duration, schedules, exceptions, and existing reservations. The conceptual capacity model remains TBD: staff-specific reservations, service/resource capacity reservations, or a hybrid assignment. No option is selected by this SRS.                                                                                                                                            |
+| BR-007 Appointment conflict prevention       | The system detects overlapping reservation intervals, including variable-duration services, and prevents two reservations from consuming the same incompatible capacity simultaneously, including under concurrent requests. Which appointment states consume capacity is a future policy decision and remains TBD.                                                                                                                      |
+| BR-008 Queue sequence allocation             | Sequence allocation is atomic and scoped to tenant, branch, service/room, and the business day derived using the branch IANA timezone. Parallel joins must not receive conflicting sequence assignments in that scope. Duplicate numbers across rooms are valid.                                                                                                                                                                         |
+| BR-009 Queue ticket lifecycle                | Initial status vocabulary is WAITING, CALLED, SERVING, COMPLETED, NO_SHOW, and CANCELLED. Allowed transitions, recall, skipping, reopening, and other exceptional transitions require further specification and remain TBD.                                                                                                                                                                                                              |
+| BR-010 Waiting-time estimate                 | An estimate, if shown, is informational and shall be based on available queue/service data. Estimation method, confidence language, and whether MVP includes estimates are TBD.                                                                                                                                                                                                                                                          |
+| BR-011 Branch time                           | Branch operating schedules use an IANA timezone. Persisted instants use UTC; local dates/times are interpreted with the branch timezone, including daylight-saving transitions where applicable.                                                                                                                                                                                                                                         |
+| BR-012 QR security                           | A QR code is a public entry point, not an authorization credential for private data. Sensitive QR-linked token material is stored as a hash, and rotation/revocation policy is TBD.                                                                                                                                                                                                                                                      |
+| BR-013 Customer privacy                      | Public pages and queue events disclose only the minimum information needed to identify status, and do not reveal another customer's personal details.                                                                                                                                                                                                                                                                                    |
+| BR-014 Auditability                          | Security-sensitive and important operational changes are attributable and timestamped, without placing secret or unnecessary personal data in audit records.                                                                                                                                                                                                                                                                             |
+| BR-015 Queue event timestamps                | Queue creation and state changes append actual server-generated UTC event times and actor identity for authenticated staff actions; prior event times are not overwritten.                                                                                                                                                                                                                                                               |
+| BR-016 Guest queue profile consent           | Guest queue entry does not create a persistent customer profile. After completion, explicit opt-in is required; declined consent does not block the journey. Verified contact matching may prevent a duplicate profile. Marketing consent is separate.                                                                                                                                                                                   |
+| BR-017 Queue retention                       | Retain ticket customer snapshot fields for 12 months after entry, then erase or anonymize those identifying fields. Retain minimal ticket/event data required for operational reporting and audit for 24 months, then delete it; non-identifying aggregates may be retained longer. Ticket access credentials expire after 7 days. These proposed periods require jurisdiction/legal review and automated enforcement before production. |
 
 ### 7. Non-Functional Requirements
 
@@ -539,21 +568,21 @@ The architecture may later support external notification providers for confirmat
 
 This section identifies conceptual entities and relationships only; it does not finalize schemas, field types, indexes, or collection names.
 
-| Entity | Requirements-level purpose and relationships |
-|---|---|
-| User | Represents an account holder and, for a registered customer, the person's identity across booking and queue flows. May have memberships in multiple businesses and may also act as an owner or staff member. A customer booking at a business does not itself require a membership there. Authentication data is protected separately from public profile information. |
-| Business (tenant) | Represents an independently managed organization. Owns branches, services, settings, memberships, and related operational data. |
-| Membership | Links one user to one business and assigns tenant-level role/permissions and status. A user may have multiple memberships. |
-| Branch | Belongs to one business and has location, IANA timezone, operating hours, and service/staff associations. |
-| Feature settings | Belong to or are effective for a business and define enabled platform capabilities subject to backend validation. Whether settings can vary by branch is TBD. |
-| Service | Belongs to a business and may be offered at selected branches and by eligible staff; contains booking/queue and duration configuration. |
-| Staff assignment and schedule | Relates a staff membership to branches/services and defines availability and exceptions. Exact schedule model is TBD. |
-| Customer profile | Holds customer details needed for account or business interactions and may be linked to bookings without a business membership, subject to privacy and retention policy. Guest identity handling and duplicate-profile handling are TBD. |
-| Appointment | Associates a customer/guest, business, branch, service, time, and optionally staff; has status and lifecycle history. Tenant ownership is required. |
-| Queue configuration | Represents an operational queue scope associated with a business/branch and possibly service. Queue reset and numbering policy are TBD. |
-| Queue ticket | Associates customer/guest with the queue and sequence, status, timestamps, and relevant service details. Tenant ownership is required. |
-| Public access token | Supports limited access to a public flow or customer's own status. Sensitive token values are represented by hashes and have defined scope/lifecycle. |
-| Audit event | Records important security/configuration/operational changes, actor, tenant context where applicable, action, and UTC time, without unnecessary sensitive content. |
+| Entity                        | Requirements-level purpose and relationships                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User                          | Represents an account holder and, for a registered customer, the person's identity across booking and queue flows. May have memberships in multiple businesses and may also act as an owner or staff member. A customer booking at a business does not itself require a membership there. Authentication data is protected separately from public profile information. |
+| Business (tenant)             | Represents an independently managed organization. Owns branches, services, settings, memberships, and related operational data.                                                                                                                                                                                                                                        |
+| Membership                    | Links one user to one business and assigns tenant-level role/permissions and status. A user may have multiple memberships.                                                                                                                                                                                                                                             |
+| Branch                        | Belongs to one business and has location, IANA timezone, operating hours, and service/staff associations.                                                                                                                                                                                                                                                              |
+| Feature settings              | Belong to or are effective for a business and define enabled platform capabilities subject to backend validation. Whether settings can vary by branch is TBD.                                                                                                                                                                                                          |
+| Service                       | Belongs to a business and may be offered at selected branches and by eligible staff; contains booking/queue and duration configuration.                                                                                                                                                                                                                                |
+| Staff assignment and schedule | Relates a staff membership to branches/services and defines availability and exceptions. Exact schedule model is TBD.                                                                                                                                                                                                                                                  |
+| Customer profile              | Holds customer details needed for account or business interactions and may be linked to bookings without a business membership. A guest queue ticket uses a minimum customer snapshot and creates or associates a persistent profile only after explicit post-service consent. Verified-contact matching and retention follow BR-016 and BR-017.                       |
+| Appointment                   | Associates a customer/guest, business, branch, service, time, and optionally staff; has status and lifecycle history. Tenant ownership is required.                                                                                                                                                                                                                    |
+| Queue configuration           | Represents an independent queue for a business/branch/service. Each queue's sequence is scoped by branch-local business date, derived using the branch IANA timezone.                                                                                                                                                                                                  |
+| Queue ticket                  | Associates customer/guest with the queue and sequence, status, timestamps, and relevant service details. Tenant ownership is required.                                                                                                                                                                                                                                 |
+| Public access token           | Supports limited access to a public flow or customer's own status. Sensitive token values are represented by hashes and have defined scope/lifecycle.                                                                                                                                                                                                                  |
+| Audit event                   | Records important security/configuration/operational changes, actor, tenant context where applicable, action, and UTC time, without unnecessary sensitive content.                                                                                                                                                                                                     |
 
 All business-owned entities and records shall be tenant-scoped, including indirect relationships. Relationships crossing tenant boundaries shall be rejected unless a specifically approved platform-level operation applies.
 
@@ -626,22 +655,27 @@ The MVP may be considered successful when high-level acceptance testing demonstr
 14. Owners can review agreed appointment and queue counts scoped to their business, and platform administrators can view registered businesses, manage tenant activation, monitor usage, and review approved platform analytics without unrestricted private tenant/customer data access.
 15. The initial queue statuses are WAITING, CALLED, SERVING, COMPLETED, NO_SHOW, and CANCELLED; implemented actions follow the approved transition policy, while unspecified exceptional transitions remain unavailable until defined.
 16. All acceptance tests, security checks, and other release gates are defined and executed before release; numerical performance and availability gates remain TBD until approved.
+17. Two services at one branch independently allocate ticket number 1 for the same local business day; calling in one service never changes the other service's queue.
+18. Authorized staff can be assigned to multiple services and only operate their assigned branch/service scope; simultaneous actions cannot claim the same ticket twice.
+19. The owner Live Rooms and Activity Log show server-recorded queue events and update after ticket or assignment changes without exposing private data through public responses or events.
+20. A guest joins with only a name and service, can retrieve status through their secure ticket credential, and can leave while eligible; email, phone, and an account are optional.
+21. Queue entry alone creates no persistent customer profile. A completed guest ticket creates/associates a profile only after explicit opt-in; declining remains a successful journey.
 
 ### 14. Risks and Constraints
 
-| Risk / constraint | Potential impact | Requirement/design response |
-|---|---|---|
-| Tenant scoping omissions | Cross-business data exposure or modification | Centralize and test tenant-aware authorization and data access; treat tenant isolation as a release-critical acceptance area. |
-| Concurrent reservation requests | Double booking or inconsistent availability | Define constrained capacity precisely and use an atomic persistence strategy; test competing requests. |
-| Concurrent queue joins | Duplicate, missing, or misordered sequence numbers | Allocate sequence atomically in the correct branch/queue scope and test contention. |
-| Unclear business scheduling models | Incorrect availability across services, staff, or locations | Resolve capacity, staff assignment, duration/buffer, holidays, and timezone rules before finalizing scheduling design. |
-| Guest access and public tokens | Account enumeration, ticket disclosure, or abuse | Minimize guest data, use hashed scoped tokens, establish verification, expiry, rotation, and rate-limit policies. |
-| Real-time authorization | Cross-tenant event leakage or stale customer information | Authorize connections/subscriptions, minimize payloads, and support authoritative state refetch after reconnect. |
-| Timezone and daylight-saving transitions | Customer sees incorrect local time or conflicting slot | Use IANA branch timezones and define how ambiguous/nonexistent local times are handled. |
-| External delivery dependency | Notifications may be delayed or unavailable | External providers are not committed for MVP; define behavior and delivery expectations if later added. |
-| Unspecified scale and hosting | Inability to size infrastructure or set operational targets | Establish expected tenants, traffic, concurrent sockets, hosting region, and recovery targets before production readiness. |
-| Privacy/legal obligations unknown | Product may not meet applicable jurisdictional obligations | Identify launch jurisdictions and establish legal, consent, retention, deletion, and data residency requirements before launch. |
-| Scope breadth across industries | Domain workflows may diverge and expand MVP | Keep initial workflows configurable but bounded; approve industry-specific variations separately. |
+| Risk / constraint                        | Potential impact                                                    | Requirement/design response                                                                                                     |
+| ---------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Tenant scoping omissions                 | Cross-business data exposure or modification                        | Centralize and test tenant-aware authorization and data access; treat tenant isolation as a release-critical acceptance area.   |
+| Concurrent reservation requests          | Double booking or inconsistent availability                         | Define constrained capacity precisely and use an atomic persistence strategy; test competing requests.                          |
+| Concurrent queue joins and staff actions | Duplicate sequence numbers or one ticket being claimed by two staff | Allocate atomically per tenant/branch/service/local business date and use conditional ticket-state updates; test contention.    |
+| Unclear business scheduling models       | Incorrect availability across services, staff, or locations         | Resolve capacity, staff assignment, duration/buffer, holidays, and timezone rules before finalizing scheduling design.          |
+| Guest access and public tokens           | Account enumeration, ticket disclosure, or abuse                    | Minimize guest data, use hashed scoped tokens, establish verification, expiry, rotation, and rate-limit policies.               |
+| Real-time authorization                  | Cross-tenant event leakage or stale customer information            | Authorize connections/subscriptions, minimize payloads, and support authoritative state refetch after reconnect.                |
+| Timezone and daylight-saving transitions | Customer sees incorrect local time or conflicting slot              | Use IANA branch timezones and define how ambiguous/nonexistent local times are handled.                                         |
+| External delivery dependency             | Notifications may be delayed or unavailable                         | External providers are not committed for MVP; define behavior and delivery expectations if later added.                         |
+| Unspecified scale and hosting            | Inability to size infrastructure or set operational targets         | Establish expected tenants, traffic, concurrent sockets, hosting region, and recovery targets before production readiness.      |
+| Privacy/legal obligations unknown        | Product may not meet applicable jurisdictional obligations          | Identify launch jurisdictions and establish legal, consent, retention, deletion, and data residency requirements before launch. |
+| Scope breadth across industries          | Domain workflows may diverge and expand MVP                         | Keep initial workflows configurable but bounded; approve industry-specific variations separately.                               |
 
 ### 15. Future Enhancements
 

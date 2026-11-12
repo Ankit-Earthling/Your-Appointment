@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import App from './App.jsx';
+import { PublicQueueTicket } from './RolePages.jsx';
+
+vi.mock('socket.io-client', () => ({
+  io: () => ({ on: vi.fn(), disconnect: vi.fn() }),
+}));
 
 afterEach(() => {
   cleanup();
@@ -10,6 +15,90 @@ afterEach(() => {
 });
 
 describe('Your Appointment app', () => {
+  it('lets a guest decline post-service profile creation without sending profile data', async () => {
+    const requests = [];
+    window.location.hash = '#synthetic-ticket-token';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url, options = {}) => {
+        requests.push({ url, options });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              ticket: {
+                id: 'ticket-1',
+                status: 'COMPLETED',
+                sequenceNumber: 3,
+                joinedAt: '2026-11-12T10:00:00Z',
+                peopleAhead: 0,
+                service: { name: 'Room A' },
+                branch: { name: 'Central', timezone: 'Asia/Kolkata' },
+              },
+            },
+          }),
+        };
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/queue/ticket/ticket-1']}>
+        <PublicQueueTicket />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Save my details with this business/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'No thanks' }));
+    expect(await screen.findByText('No profile was created.')).toBeTruthy();
+    expect(requests.some(({ url }) => url.endsWith('/profile'))).toBe(false);
+    window.location.hash = '';
+  });
+
+  it('requires explicit consent before saving a guest profile', async () => {
+    const requests = [];
+    window.location.hash = '#synthetic-ticket-token';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url, options = {}) => {
+        requests.push({ url, options });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              ticket: {
+                id: 'ticket-1',
+                status: 'COMPLETED',
+                sequenceNumber: 3,
+                joinedAt: '2026-11-12T10:00:00Z',
+                peopleAhead: 0,
+                service: { name: 'Room A' },
+                branch: { name: 'Central', timezone: 'Asia/Kolkata' },
+              },
+            },
+          }),
+        };
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/queue/ticket/ticket-1']}>
+        <PublicQueueTicket />
+      </MemoryRouter>,
+    );
+
+    const save = await screen.findByRole('button', { name: 'Save my details' });
+    expect(save).toBeDisabled();
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(save);
+    expect(await screen.findByText('Your profile was saved.')).toBeTruthy();
+    expect(
+      requests.some(({ url, options }) => url.endsWith('/profile') && options.method === 'POST'),
+    ).toBe(true);
+    window.location.hash = '';
+  });
+
   it('shows the public appointment and queue entry points', async () => {
     vi.stubGlobal(
       'fetch',

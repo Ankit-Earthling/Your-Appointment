@@ -68,6 +68,12 @@ async function customer(tenantId, user, body) {
     phone: body.phone ?? '',
   });
 }
+function ticketCustomerName(ticket) {
+  const snapshotName = ticket.customerSnapshot?.displayName?.trim();
+  const profileName = ticket.customerProfileId?.displayName?.trim();
+  return snapshotName || profileName || 'Guest customer';
+}
+
 function emitQueue(tenantId, branchId, payload) {
   const io = ioRef();
   if (!io) return;
@@ -307,8 +313,20 @@ router.get(
     const appointments = await Appointment.find(filter)
       .sort({ startAt: 1 })
       .limit(200)
-      .select('-customerUserId -customerProfileId');
-    res.json({ data: appointments });
+      .select('-customerUserId')
+      .populate({
+        path: 'customerProfileId',
+        match: { tenantId: req.tenantId },
+        select: 'displayName',
+      });
+    const safeAppointments = appointments.map((appointment) => {
+      const safeAppointment = appointment.toObject();
+      safeAppointment.customerDisplayName =
+        appointment.customerProfileId?.displayName?.trim() || 'Customer';
+      delete safeAppointment.customerProfileId;
+      return safeAppointment;
+    });
+    res.json({ data: safeAppointments });
   }),
 );
 
@@ -506,6 +524,11 @@ router.post(
       isOpen: true,
     });
     if (!config) throw new AppError(409, 'QUEUE_CLOSED', 'This queue is closed.');
+    const businessProfile = accountUser
+      ? await CustomerProfile.findOne({ tenantId: business._id, userId: accountUser._id }).select(
+          'displayName',
+        )
+      : null;
     const date = localDate(new Date(), branch.timezone);
     let counter;
     try {
@@ -538,7 +561,8 @@ router.post(
       customerUserId: accountUser?._id ?? null,
       customerProfileId: null,
       customerSnapshot: {
-        displayName: accountUser?.displayName ?? req.body.displayName,
+        displayName:
+          businessProfile?.displayName?.trim() || accountUser?.displayName || req.body.displayName,
         email: accountUser?.email ?? req.body.email ?? '',
         phone: req.body.phone ?? '',
       },
@@ -794,14 +818,26 @@ router.get(
     const tickets = await QueueTicket.find(query)
       .sort({ joinedAt: 1 })
       .limit(200)
-      .select('-customerUserId -customerProfileId')
+      .select('-customerUserId')
+      .populate({
+        path: 'customerProfileId',
+        match: { tenantId: req.tenantId },
+        select: 'displayName',
+      })
       .populate('serviceId', 'name')
       .populate('branchId', 'name timezone')
       .populate(
         'calledByUserId servingStaffUserId completedByUserId noShowByUserId cancelledByUserId',
         'displayName',
       );
-    res.json({ data: tickets });
+    const safeTickets = tickets.map((ticket) => {
+      const safeTicket = ticket.toObject();
+      safeTicket.customerDisplayName = ticketCustomerName(ticket);
+      delete safeTicket.customerSnapshot;
+      delete safeTicket.customerProfileId;
+      return safeTicket;
+    });
+    res.json({ data: safeTickets });
   }),
 );
 router.post(
@@ -981,7 +1017,13 @@ router.get(
         branchId: branch._id,
         localDate: date,
         status: { $in: ['WAITING', 'CALLED', 'SERVING'] },
-      }).sort({ sequenceNumber: 1 }),
+      })
+        .sort({ sequenceNumber: 1 })
+        .populate({
+          path: 'customerProfileId',
+          match: { tenantId: req.tenantId },
+          select: 'displayName',
+        }),
       StaffAssignment.find({
         tenantId: req.tenantId,
         branchId: branch._id,
@@ -1028,7 +1070,7 @@ router.get(
                 ticketId: current._id,
                 sequenceNumber: current.sequenceNumber,
                 status: current.status,
-                displayName: current.customerSnapshot?.displayName ?? 'Customer',
+                displayName: ticketCustomerName(current),
                 joinedAt: current.joinedAt,
                 calledAt: current.calledAt,
                 serviceStartedAt: current.serviceStartedAt,
@@ -1082,7 +1124,14 @@ router.get(
       .sort({ joinedAt: -1 })
       .limit(250)
       .populate('serviceId', 'name')
-      .select('serviceId sequenceNumber customerSnapshot joinedAt serviceStartedAt statusHistory');
+      .populate({
+        path: 'customerProfileId',
+        match: { tenantId: req.tenantId },
+        select: 'displayName',
+      })
+      .select(
+        'serviceId customerProfileId sequenceNumber customerSnapshot joinedAt serviceStartedAt statusHistory',
+      );
     const actorIds = [
       ...new Set(
         tickets.flatMap((ticket) =>
@@ -1111,7 +1160,7 @@ router.get(
             at: event.at,
             service: ticket.serviceId?.name ?? 'Service',
             sequenceNumber: ticket.sequenceNumber,
-            customer: ticket.customerSnapshot?.displayName ?? 'Anonymous customer',
+            customer: ticketCustomerName(ticket),
             action: event.status,
             staff: event.actorUserId ? (actorById.get(String(event.actorUserId)) ?? 'Staff') : null,
             joinedAt: ticket.joinedAt,

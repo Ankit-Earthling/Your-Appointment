@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import App from './App.jsx';
-import { PublicQueueTicket } from './RolePages.jsx';
+import { PublicQueueTicket, QueueManagementPage } from './RolePages.jsx';
 
 vi.mock('socket.io-client', () => ({
-  io: () => ({ on: vi.fn(), disconnect: vi.fn() }),
+  io: () => ({ on: vi.fn(), emit: vi.fn(), disconnect: vi.fn(), connect: vi.fn() }),
 }));
 
 afterEach(() => {
@@ -15,6 +15,49 @@ afterEach(() => {
 });
 
 describe('Your Appointment app', () => {
+  it.each([
+    ['a named guest', 'Anonymous guest', 'Anonymous guest'],
+    ['a missing name', '   ', 'Guest customer'],
+  ])('shows %s by name in the authorized room queue', async (_label, name, expected) => {
+    const data = {
+      businessId: 'business-1',
+      branchId: 'branch-1',
+      setBranchId: vi.fn(),
+      branches: [{ id: 'branch-1', name: 'Central', timezone: 'Asia/Kolkata' }],
+      services: [
+        { id: 'service-1', name: 'Consultation', queueEnabled: true, branchIds: ['branch-1'] },
+      ],
+      assignments: [],
+      tickets: [
+        {
+          _id: 'ticket-1',
+          sequenceNumber: 1,
+          status: 'SERVING',
+          customerDisplayName: name,
+          joinedAt: '2026-11-12T10:00:00.000Z',
+          calledAt: new Date(Date.now() - 60_000).toISOString(),
+          servingStaffUserId: { displayName: 'Maya Staff' },
+          serviceId: { _id: 'service-1', name: 'Consultation' },
+          branchId: { _id: 'branch-1' },
+        },
+      ],
+      error: '',
+      refresh: vi.fn(),
+    };
+    render(
+      <MemoryRouter>
+        <QueueManagementPage data={data} role="owner" />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(expected)).toBeTruthy();
+    expect(screen.getByText(/Consultation.*Ticket #1/)).toBeTruthy();
+    expect(screen.getByText(/Joined/)).toBeTruthy();
+    expect(screen.getByText(/Waiting \d+ min/)).toBeTruthy();
+    expect(screen.getByText('SERVING')).toBeTruthy();
+    expect(screen.getByText(/Serving: Maya Staff/)).toBeTruthy();
+  });
+
   it('lets a guest decline post-service profile creation without sending profile data', async () => {
     const requests = [];
     window.location.hash = '#synthetic-ticket-token';

@@ -154,8 +154,16 @@ beforeEach(async () => {
 });
 
 describe('independent room queue operations', () => {
-  it('starts each room at ticket one and accepts a name without contact details or profile creation', async () => {
-    const roomA = await join(serviceA._id, 'Asha Guest');
+  it('starts each room at ticket one and keeps guest contact details private', async () => {
+    const roomA = await request(app)
+      .post(`/api/v1/public/branches/${branch._id}/queue-tickets`)
+      .send({
+        serviceId: String(serviceA._id),
+        displayName: 'Asha Guest',
+        email: 'asha-private@example.test',
+        phone: '555-0123',
+      })
+      .expect(201);
     const roomB = await join(serviceB._id, 'Ravi Guest');
     expect(roomA.body.data.ticket.sequenceNumber).toBe(1);
     expect(roomB.body.data.ticket.sequenceNumber).toBe(1);
@@ -167,10 +175,58 @@ describe('independent room queue operations', () => {
       .expect(200);
     expect(status.body.data.ticket.service.name).toBe('Room A');
     expect(JSON.stringify(status.body)).not.toContain('Asha Guest');
+    expect(JSON.stringify(status.body)).not.toContain('asha-private@example.test');
+    expect(JSON.stringify(status.body)).not.toContain('555-0123');
+  });
+
+  it("uses a registered customer's same-tenant profile name without requiring tenant membership", async () => {
+    const registeredCustomer = await User.create({
+      email: `customer-${crypto.randomUUID()}@example.test`,
+      displayName: 'Global Account Name',
+      passwordHash: 'test-hash',
+    });
+    const profile = await CustomerProfile.create({
+      tenantId: tenant._id,
+      userId: registeredCustomer._id,
+      displayName: 'Business Preferred Name',
+      email: registeredCustomer.email,
+    });
+    const response = await request(app)
+      .post(`/api/v1/public/branches/${branch._id}/queue-tickets`)
+      .set(as(registeredCustomer))
+      .send({ serviceId: String(serviceA._id), displayName: 'Typed Name' })
+      .expect(201);
+    const ticketList = await request(app)
+      .get(`/api/v1/businesses/${tenant._id}/queue-tickets?serviceId=${serviceA._id}`)
+      .set(as(owner))
+      .expect(200);
+    expect(ticketList.body.data[0].customerDisplayName).toBe('Business Preferred Name');
+    expect(JSON.stringify(ticketList.body)).not.toContain(registeredCustomer.email);
+    expect(
+      await Membership.exists({ tenantId: tenant._id, userId: registeredCustomer._id }),
+    ).toBeFalsy();
+    expect(response.body.data.ticket.status).toBe('WAITING');
+    await QueueTicket.collection.updateOne(
+      { _id: new mongoose.Types.ObjectId(response.body.data.ticket.id) },
+      { $set: { 'customerSnapshot.displayName': '', customerProfileId: profile._id } },
+    );
+    const profileFallback = await request(app)
+      .get(`/api/v1/businesses/${tenant._id}/queue-tickets?serviceId=${serviceA._id}`)
+      .set(as(owner))
+      .expect(200);
+    expect(profileFallback.body.data[0].customerDisplayName).toBe('Business Preferred Name');
   });
 
   it('filters operational tickets by branch and service and only calls the selected room', async () => {
-    const ticketA = await join(serviceA._id);
+    const ticketA = await request(app)
+      .post(`/api/v1/public/branches/${branch._id}/queue-tickets`)
+      .send({
+        serviceId: String(serviceA._id),
+        displayName: 'Authorized Guest',
+        email: 'private@example.test',
+        phone: '555-0100',
+      })
+      .expect(201);
     const ticketB = await join(serviceB._id);
     const listA = await request(app)
       .get(
@@ -180,9 +236,50 @@ describe('independent room queue operations', () => {
       .expect(200);
     expect(listA.body.data).toHaveLength(1);
     expect(String(listA.body.data[0]._id)).toBe(ticketA.body.data.ticket.id);
+    expect(listA.body.data[0].customerDisplayName).toBe('Authorized Guest');
+    expect(listA.body.data[0]).not.toHaveProperty('customerSnapshot');
+    expect(listA.body.data[0]).not.toHaveProperty('customerProfileId');
+    expect(JSON.stringify(listA.body)).not.toContain('private@example.test');
+    expect(JSON.stringify(listA.body)).not.toContain('555-0100');
+    const staffList = await request(app)
+      .get(
+        `/api/v1/businesses/${tenant._id}/queue-tickets?branchId=${branch._id}&serviceId=${serviceA._id}`,
+      )
+      .set(as(staffOne))
+      .expect(200);
+    expect(staffList.body.data[0].customerDisplayName).toBe('Authorized Guest');
     await callNext(owner, serviceA._id).expect(200);
     expect((await QueueTicket.findById(ticketA.body.data.ticket.id)).status).toBe('CALLED');
     expect((await QueueTicket.findById(ticketB.body.data.ticket.id)).status).toBe('WAITING');
+  });
+
+  it('falls back safely for missing names and never resolves another tenant customer profile', async () => {
+    const joined = await join(serviceA._id, 'Temporary name');
+    const ticketId = joined.body.data.ticket.id;
+    const foreignTenant = new mongoose.Types.ObjectId();
+    const foreignProfile = await CustomerProfile.create({
+      tenantId: foreignTenant,
+      displayName: 'Private Foreign Customer',
+    });
+    await QueueTicket.collection.updateOne(
+      { _id: new mongoose.Types.ObjectId(ticketId) },
+      {
+        $set: {
+          'customerSnapshot.displayName': '   ',
+          customerProfileId: foreignProfile._id,
+        },
+      },
+    );
+
+    const response = await request(app)
+      .get(
+        `/api/v1/businesses/${tenant._id}/queue-tickets?branchId=${branch._id}&serviceId=${serviceA._id}`,
+      )
+      .set(as(owner))
+      .expect(200);
+    expect(response.body.data[0].customerDisplayName).toBe('Guest customer');
+    expect(JSON.stringify(response.body)).not.toContain('Private Foreign Customer');
+    expect(JSON.stringify(response.body)).not.toContain('Temporary name');
   });
 
   it('denies a staff member operation on an unassigned service', async () => {
@@ -268,6 +365,7 @@ describe('independent room queue operations', () => {
           entry.room.endsWith(`:service:${serviceA._id}`) && entry.event === 'queue.updated',
       ),
     ).toBe(true);
+    expect(JSON.stringify(emitted)).not.toContain('Monitor guest');
     const monitor = await request(app)
       .get(`/api/v1/businesses/${tenant._id}/branches/${branch._id}/queue-monitor`)
       .set(as(owner))
@@ -276,6 +374,9 @@ describe('independent room queue operations', () => {
     expect(monitor.body.data.rooms.find((room) => room.service.name === 'Room A').state).toBe(
       'CALLED',
     );
+    expect(
+      monitor.body.data.rooms.find((room) => room.service.name === 'Room A').current.displayName,
+    ).toBe('Monitor guest');
     expect(
       monitor.body.data.rooms.find((room) => room.service.name === 'Room A').assignedStaff,
     ).toHaveLength(2);
@@ -287,7 +388,8 @@ describe('independent room queue operations', () => {
       activity.body.data.entries.some(
         (entry) =>
           entry.sequenceNumber === ticket.body.data.ticket.sequenceNumber &&
-          entry.action === 'CALLED',
+          entry.action === 'CALLED' &&
+          entry.customer === 'Monitor guest',
       ),
     ).toBe(true);
   });

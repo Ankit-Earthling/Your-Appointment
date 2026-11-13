@@ -10,7 +10,7 @@
     'Segoe UI',
     sans-serif;
   color: #0f172a;
-  background: #f7f8fc;
+  background: #f8f7f4;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -45,10 +45,10 @@ button:disabled {
 }
 
 .surface {
-  border: 1px solid #e2e8f0;
+  border: 1px solid #e7e5e4;
   border-radius: 1.25rem;
   background: #fff;
-  box-shadow: 0 12px 32px rgb(15 23 42 / 5%);
+  box-shadow: 0 8px 24px rgb(41 37 36 / 5%);
 }
 
 .field-label {
@@ -114,6 +114,11 @@ button:disabled {
 .button-danger:hover {
   background: #9f1239;
 }
+.button-primary:hover,
+.button-secondary:hover,
+.button-danger:hover {
+  transform: translateY(-1px);
+}
 .button-primary:focus-visible,
 .button-secondary:focus-visible,
 .button-danger:focus-visible,
@@ -150,8 +155,28 @@ button:disabled {
   text-transform: uppercase;
 }
 .toggle-on {
+  display: inline-flex;
+  min-height: 2.65rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c7d2fe;
+  border-radius: 0.7rem;
   background: #eef2ff;
   color: #3730a3;
+  padding: 0.65rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 650;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+.toggle-on:hover {
+  border-color: #a5b4fc;
+  background: #e0e7ff;
+}
+.toggle-on:focus-visible {
+  outline: 3px solid #a5b4fc;
+  outline-offset: 2px;
 }
 .data-table {
   width: 100%;
@@ -197,8 +222,29 @@ button:disabled {
   color: #3730a3;
 }
 
+.queue-ticket-row {
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @media (max-width: 640px) {
   .data-table {
     min-width: 650px;
+  }
+
+  .queue-ticket-row {
+    align-items: flex-start;
+  }
+
+  .queue-ticket-row > div:last-child button {
+    min-height: 2.75rem;
   }
 }

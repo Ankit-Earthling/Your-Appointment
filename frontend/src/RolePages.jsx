@@ -75,6 +75,42 @@ function dateTime(value, timezone) {
   }).format(new Date(value));
 }
 
+function customerName(ticket) {
+  const name =
+    ticket.customerDisplayName ?? ticket.displayName ?? ticket.customerSnapshot?.displayName;
+  return typeof name === 'string' && name.trim() ? name.trim() : 'Guest customer';
+}
+
+function elapsedMinutes(start, end = Date.now()) {
+  if (!start) return '—';
+  const startTime = new Date(start).getTime();
+  const endTime = typeof end === 'number' ? end : new Date(end).getTime();
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return '—';
+  return `${Math.max(0, Math.floor((endTime - startTime) / 60000))} min`;
+}
+
+function queueStatusLabel(status) {
+  return status?.replaceAll('_', ' ') ?? 'Unknown';
+}
+
+function ticketStaffLabel(ticket) {
+  const staffByStatus = {
+    CALLED: ['Called by', ticket.calledByUserId?.displayName],
+    SERVING: ['Serving', ticket.servingStaffUserId?.displayName],
+    COMPLETED: [
+      'Served by',
+      ticket.servingStaffUserId?.displayName ?? ticket.completedByUserId?.displayName,
+    ],
+    NO_SHOW: ['No-show marked by', ticket.noShowByUserId?.displayName],
+    CANCELLED: [
+      'Cancelled by',
+      ticket.cancelledByUserId?.displayName ?? ticket.calledByUserId?.displayName,
+    ],
+  };
+  const [label, name] = staffByStatus[ticket.status] ?? [];
+  return name ? `${label}: ${name}` : '';
+}
+
 function statusClass(status) {
   const classes = {
     BOOKED: 'bg-blue-50 text-blue-700',
@@ -167,21 +203,23 @@ function Select({ label, children, className = '', ...props }) {
 
 export function LoadingView({ label = 'Loading your workspace' }) {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-50 px-5">
-      <div className="text-center">
-        <span
-          className="mx-auto block h-8 w-8 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-700"
-          aria-hidden="true"
-        />
-        <p className="mt-4 text-sm text-slate-600">{label}</p>
-      </div>
+    <main className="flex min-h-screen items-center justify-center bg-stone-50 px-5 py-10">
+      <section className="surface w-full max-w-3xl p-6" role="status" aria-busy="true">
+        <p className="text-sm font-medium text-slate-600">{label}</p>
+        <div className="mt-5 grid animate-pulse gap-4 sm:grid-cols-3" aria-hidden="true">
+          <div className="h-24 rounded-xl bg-slate-100" />
+          <div className="h-24 rounded-xl bg-slate-100" />
+          <div className="h-24 rounded-xl bg-slate-100" />
+        </div>
+        <div className="mt-4 h-40 animate-pulse rounded-xl bg-slate-100" aria-hidden="true" />
+      </section>
     </main>
   );
 }
 
 export function LandingPage({ user }) {
   return (
-    <main className="min-h-screen bg-[#f7f8fc] text-slate-900">
+    <main className="min-h-screen bg-stone-50 text-slate-900">
       <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-6 sm:px-8">
         <Link to="/" className="flex items-center gap-3 font-semibold tracking-tight">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-700 text-lg text-white">
@@ -286,6 +324,7 @@ export function PublicQueueTicket() {
       auth: { publicAccessToken: token },
     });
     socket.on('ticket.updated', refresh);
+    socket.on('connect', refresh);
     return () => socket.disconnect();
   }, [token, refresh]);
   async function leave() {
@@ -523,7 +562,7 @@ function RoleLayout({
       ? roleBusinesses(businesses, 'staff')[0]
       : roleBusinesses(businesses, 'owner')[0];
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen bg-stone-50 text-slate-900">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white lg:flex">
         <Link
           to="/"
@@ -574,6 +613,7 @@ function RoleLayout({
           <button
             className="button-secondary lg:hidden"
             aria-expanded={mobileNavOpen}
+            aria-controls="mobile-workspace-navigation"
             onClick={() => setMobileNavOpen(!mobileNavOpen)}
           >
             Menu
@@ -588,8 +628,24 @@ function RoleLayout({
         {mobileNavOpen && (
           <nav
             aria-label="Mobile navigation"
+            id="mobile-workspace-navigation"
             className="sticky top-16 z-20 grid grid-cols-2 gap-1 border-b border-slate-200 bg-white p-3 sm:grid-cols-3 lg:hidden"
           >
+            <label className="field-label col-span-full px-2">
+              Business
+              <select
+                aria-label="Select business"
+                className="field-control"
+                value={businessId}
+                onChange={(event) => onBusinessChange(event.target.value)}
+              >
+                {businesses.map((business) => (
+                  <option key={business.id} value={business.id}>
+                    {business.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             {navItems}
             <button className="nav-link text-left" onClick={onLogout}>
               Sign out
@@ -941,7 +997,7 @@ function useBusinessData(businessId, branchId, withAnalytics = false) {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
     const queryBranch = branchId ? `?branchId=${encodeURIComponent(branchId)}` : '';
@@ -973,10 +1029,38 @@ function useBusinessData(businessId, branchId, withAnalytics = false) {
       analytics: withAnalytics ? value(6, null) : null,
     });
     setLoading(false);
-  };
-  useEffect(() => {
-    refresh(); /* refresh is tied to the selected tenant and branch */
   }, [businessId, branchId, withAnalytics]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  const subscribedBranchIds = branchId
+    ? [String(branchId)]
+    : data.branches.map((branch) => String(branch.id));
+  const branchSubscriptionKey = subscribedBranchIds.join(',');
+  useEffect(() => {
+    if (!businessId || !branchSubscriptionKey) return;
+    const socket = io(API.replace('/api/v1', ''), {
+      withCredentials: true,
+      path: '/api/socket.io',
+    });
+    const joinBranches = () => {
+      branchSubscriptionKey
+        .split(',')
+        .forEach((subscribedBranchId) =>
+          socket.emit('tenant:join', { businessId, branchId: subscribedBranchId }),
+        );
+    };
+    socket.on('queue.updated', refresh);
+    socket.on('staff.assignment.updated', refresh);
+    socket.on('disconnect', (reason) => {
+      if (reason === 'io server disconnect') socket.connect();
+    });
+    socket.on('connect', () => {
+      joinBranches();
+      refresh();
+    });
+    return () => socket.disconnect();
+  }, [businessId, branchSubscriptionKey, refresh]);
   return { ...data, loading, error, refresh, businessId };
 }
 
@@ -1136,9 +1220,25 @@ function OwnerOverview({ data }) {
     .filter((item) => item.status === 'BOOKED' && new Date(item.startAt) > new Date())
     .sort((a, b) => new Date(a.startAt) - new Date(b.startAt))
     .slice(0, 5);
-  const recent = [...data.appointments]
-    .sort((a, b) => new Date(b.createdAt ?? b.startAt) - new Date(a.createdAt ?? a.startAt))
-    .slice(0, 5);
+  const recent = [
+    ...data.appointments.map((appointment) => ({
+      at: appointment.createdAt ?? appointment.startAt,
+      branchId: appointment.branchId?._id ?? appointment.branchId,
+      label: 'Appointment booking',
+      detail: `${data.services.find((service) => String(service.id) === String(appointment.serviceId?._id ?? appointment.serviceId))?.name ?? 'Appointment'} · ${appointment.status}`,
+    })),
+    ...data.tickets.flatMap((ticket) =>
+      (ticket.statusHistory ?? []).map((event) => ({
+        at: event.at,
+        branchId: ticket.branchId?._id ?? ticket.branchId,
+        label: `Queue ticket ${queueStatusLabel(event.status).toLowerCase()}`,
+        detail: `${ticket.serviceId?.name ?? 'Room'} · #${ticket.sequenceNumber} · ${customerName(ticket)}`,
+      })),
+    ),
+  ]
+    .filter((event) => event.at)
+    .sort((a, b) => new Date(b.at) - new Date(a.at))
+    .slice(0, 6);
   return (
     <>
       <PageHeading
@@ -1192,25 +1292,35 @@ function OwnerOverview({ data }) {
         </section>
         <section className="surface p-5">
           <SectionTitle
-            title="Recent booking activity"
-            link={`/owner/${data.businessId}/appointments`}
-            linkLabel="Open appointments"
+            title="Recent business activity"
+            link={`/owner/${data.businessId}/queue-activity`}
+            linkLabel="View queue activity"
           />
           {recent.length ? (
             <div className="divide-y divide-slate-100">
-              {recent.map((item) => (
-                <AppointmentRow
-                  key={item._id}
-                  appointment={item}
-                  branches={data.branches}
-                  services={data.services}
-                />
+              {recent.map((item, index) => (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 py-3"
+                  key={`${item.at}-${item.label}-${index}`}
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium">{item.label}</p>
+                    <p className="mt-1 break-words text-sm text-slate-600">{item.detail}</p>
+                  </div>
+                  <time className="text-xs text-slate-500">
+                    {dateTime(
+                      item.at,
+                      data.branches.find((branch) => String(branch.id) === String(item.branchId))
+                        ?.timezone,
+                    )}
+                  </time>
+                </div>
               ))}
             </div>
           ) : (
             <EmptyState
-              title="Nothing booked yet"
-              description="Share your customer booking link to receive your first appointment."
+              title="No recent activity"
+              description="Appointment bookings and recorded queue actions will appear here."
             />
           )}
         </section>
@@ -1254,11 +1364,16 @@ function AppointmentRow({ appointment, branches, services, actions }) {
         <p className="font-medium text-slate-900">
           {service?.name ?? 'Appointment'} · {dateTime(appointment.startAt, branch?.timezone)}
         </p>
+        {appointment.customerDisplayName && (
+          <p className="mt-1 text-sm text-slate-700">
+            {customerName({ customerDisplayName: appointment.customerDisplayName })}
+          </p>
+        )}
         <p className="mt-1 text-xs text-slate-500">
           {branch?.name ?? 'Branch'} · {appointment._id}
         </p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className={statusClass(appointment.status)}>{appointment.status}</span>
         {actions}
       </div>
@@ -1268,15 +1383,18 @@ function AppointmentRow({ appointment, branches, services, actions }) {
 
 function AppointmentsPage({ data, role }) {
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState('');
   async function update(id, status) {
     setBusyId(id);
     setError('');
+    setNotice('');
     try {
       await api(`/businesses/${data.businessId}/appointments/${id}`, {
         method: 'PATCH',
         body: jsonBody({ status }),
       });
+      setNotice(`Appointment marked ${queueStatusLabel(status).toLowerCase()}.`);
       await data.refresh();
     } catch (e) {
       setError(e.message);
@@ -1297,6 +1415,7 @@ function AppointmentsPage({ data, role }) {
         }
       />
       <Alert>{error || data.error}</Alert>
+      <Alert type="success">{notice}</Alert>
       {data.loading && !items.length ? (
         <LoadingView />
       ) : items.length ? (
@@ -1349,40 +1468,42 @@ function AppointmentsPage({ data, role }) {
   );
 }
 
-function QueueManagementPage({ data, role }) {
+export function QueueManagementPage({ data, role }) {
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [serviceId, setServiceId] = useState('');
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
   const services = data.services.filter(
     (service) =>
       service.queueEnabled &&
       (!data.branchId || service.branchIds.some((id) => String(id) === String(data.branchId))),
   );
+  const selectedBranch = data.branches.find(
+    (branch) => String(branch.id) === String(data.branchId),
+  );
   useEffect(() => {
     if (!services.some((service) => String(service.id) === String(serviceId)))
       setServiceId(services[0]?.id ?? '');
   }, [data.branchId, data.services, serviceId]);
-  useEffect(() => {
-    if (!data.branchId) return;
-    const socket = io(API.replace('/api/v1', ''), {
-      withCredentials: true,
-      path: '/api/socket.io',
-    });
-    socket.emit('tenant:join', { businessId: data.businessId, branchId: data.branchId });
-    socket.on('queue.updated', (event) => {
-      if (!event?.serviceId || String(event.serviceId) === String(serviceId)) data.refresh();
-    });
-    return () => socket.disconnect();
-  }, [data.businessId, data.branchId, serviceId]);
   async function callNext() {
     if (!data.branchId) return;
     setBusy(true);
     setError('');
+    setNotice('');
     try {
-      await api(`/businesses/${data.businessId}/branches/${data.branchId}/queue/call-next`, {
-        method: 'POST',
-        body: jsonBody({ serviceId }),
-      });
+      const result = await api(
+        `/businesses/${data.businessId}/branches/${data.branchId}/queue/call-next`,
+        {
+          method: 'POST',
+          body: jsonBody({ serviceId }),
+        },
+      );
+      setNotice(`Ticket #${result.sequenceNumber} called for the selected room.`);
       await data.refresh();
     } catch (e) {
       setError(e.message);
@@ -1393,11 +1514,15 @@ function QueueManagementPage({ data, role }) {
   async function setStatus(ticket, status) {
     setBusy(true);
     setError('');
+    setNotice('');
     try {
       await api(`/businesses/${data.businessId}/queue-tickets/${ticket._id}`, {
         method: 'PATCH',
         body: jsonBody({ status }),
       });
+      setNotice(
+        `Ticket #${ticket.sequenceNumber} marked ${queueStatusLabel(status).toLowerCase()}.`,
+      );
       await data.refresh();
     } catch (e) {
       setError(e.message);
@@ -1441,6 +1566,7 @@ function QueueManagementPage({ data, role }) {
         }
       />
       <Alert>{error || data.error}</Alert>
+      <Alert type="success">{notice}</Alert>
       <div className="surface p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Today’s tickets</h2>
@@ -1466,7 +1592,12 @@ function QueueManagementPage({ data, role }) {
             Call next waiting ticket
           </PrimaryButton>
         </div>
-        {data.tickets.length ? (
+        {data.loading && !data.tickets.length ? (
+          <div className="grid gap-3" aria-label="Loading queue tickets">
+            <div className="h-24 animate-pulse rounded-xl bg-slate-100" />
+            <div className="h-24 animate-pulse rounded-xl bg-slate-100" />
+          </div>
+        ) : data.tickets.length ? (
           <div className="divide-y divide-slate-100">
             {data.tickets
               .filter(
@@ -1478,24 +1609,34 @@ function QueueManagementPage({ data, role }) {
               .map((ticket) => (
                 <div
                   key={ticket._id}
-                  className="flex flex-wrap items-center justify-between gap-3 py-4"
+                  className="queue-ticket-row flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-indigo-200"
                 >
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <p className="font-semibold">
                       {ticket.serviceId?.name ??
                         services.find((item) => String(item.id) === String(serviceId))?.name ??
                         'Room'}{' '}
                       · Ticket #{ticket.sequenceNumber}
                     </p>
-                    <p className="text-sm text-slate-600">
-                      {ticket.customerSnapshot?.displayName ?? 'Customer'}
-                    </p>
+                    <p className="text-sm text-slate-600">{customerName(ticket)}</p>
                     <p className="mt-1 text-xs text-slate-500">
-                      {ticket.localDate} · {ticket._id}
+                      Joined {dateTime(ticket.joinedAt, selectedBranch?.timezone)} ·{' '}
+                      <span>
+                        Waiting{' '}
+                        {elapsedMinutes(
+                          ticket.joinedAt,
+                          ticket.calledAt ?? ticket.cancelledAt ?? ticket.noShowAt ?? now,
+                        )}
+                      </span>
                     </p>
+                    {ticketStaffLabel(ticket) && (
+                      <p className="mt-1 text-xs text-slate-500">{ticketStaffLabel(ticket)}</p>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={statusClass(ticket.status)}>{ticket.status}</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={statusClass(ticket.status)}>
+                      {queueStatusLabel(ticket.status)}
+                    </span>
                     {ticket.status === 'CALLED' && (
                       <PrimaryButton disabled={busy} onClick={() => setStatus(ticket, 'SERVING')}>
                         Start service
@@ -1551,9 +1692,11 @@ function QueueManagementPage({ data, role }) {
 function RoomMonitorPage({ data }) {
   const [monitor, setMonitor] = useState(null),
     [error, setError] = useState(''),
+    [loading, setLoading] = useState(true),
     [now, setNow] = useState(Date.now());
   const refresh = useCallback(async () => {
     if (!data.branchId) return;
+    setLoading(true);
     try {
       setMonitor(
         await api(`/businesses/${data.businessId}/branches/${data.branchId}/queue-monitor`),
@@ -1561,6 +1704,8 @@ function RoomMonitorPage({ data }) {
       setError('');
     } catch (e) {
       setError(e.message);
+    } finally {
+      setLoading(false);
     }
   }, [data.businessId, data.branchId]);
   useEffect(() => {
@@ -1573,6 +1718,10 @@ function RoomMonitorPage({ data }) {
       path: '/api/socket.io',
     });
     socket.emit('tenant:join', { businessId: data.businessId, branchId: data.branchId });
+    socket.on('connect', () => {
+      socket.emit('tenant:join', { businessId: data.businessId, branchId: data.branchId });
+      refresh();
+    });
     socket.on('queue.updated', refresh);
     socket.on('staff.assignment.updated', refresh);
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -1605,11 +1754,21 @@ function RoomMonitorPage({ data }) {
         }
       />
       <Alert>{error || data.error}</Alert>
+      {error && (
+        <button className="button-secondary mb-5" onClick={refresh}>
+          Retry room monitor
+        </button>
+      )}
       {!data.branchId ? (
         <EmptyState
           title="Choose a branch"
           description="Select a branch to monitor its active rooms."
         />
+      ) : loading ? (
+        <div className="grid gap-4 xl:grid-cols-2" aria-label="Loading room monitor">
+          <div className="surface h-56 animate-pulse bg-slate-100" />
+          <div className="surface h-56 animate-pulse bg-slate-100" />
+        </div>
       ) : monitor?.rooms?.length ? (
         <div className="grid gap-4 xl:grid-cols-2">
           {monitor.rooms.map((room) => (
@@ -1633,7 +1792,7 @@ function RoomMonitorPage({ data }) {
                   <p className="text-2xl font-semibold">
                     {room.service.name} · #{room.current.sequenceNumber}
                   </p>
-                  <p className="mt-1">{room.current.displayName}</p>
+                  <p className="mt-1">{customerName({ displayName: room.current.displayName })}</p>
                   <p className="text-sm text-slate-600">
                     Staff: {room.current.servingStaff ?? 'Not assigned yet'}
                   </p>
@@ -1694,9 +1853,11 @@ function RoomMonitorPage({ data }) {
 
 function QueueActivityPage({ data }) {
   const [result, setResult] = useState(null),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     if (!data.branchId) return;
+    setLoading(true);
     try {
       setResult(
         await api(
@@ -1706,6 +1867,8 @@ function QueueActivityPage({ data }) {
       setError('');
     } catch (e) {
       setError(e.message);
+    } finally {
+      setLoading(false);
     }
   }, [data.businessId, data.branchId]);
   useEffect(() => {
@@ -1718,6 +1881,10 @@ function QueueActivityPage({ data }) {
       path: '/api/socket.io',
     });
     socket.emit('tenant:join', { businessId: data.businessId, branchId: data.branchId });
+    socket.on('connect', () => {
+      socket.emit('tenant:join', { businessId: data.businessId, branchId: data.branchId });
+      load();
+    });
     socket.on('queue.updated', load);
     return () => socket.disconnect();
   }, [data.businessId, data.branchId, load]);
@@ -1742,7 +1909,14 @@ function QueueActivityPage({ data }) {
         }
       />
       <Alert>{error || data.error}</Alert>
-      {result?.entries?.length ? (
+      {error && (
+        <button className="button-secondary mb-5" onClick={load}>
+          Retry activity log
+        </button>
+      )}
+      {loading ? (
+        <div className="surface h-56 animate-pulse bg-slate-100" aria-label="Loading activity" />
+      ) : result?.entries?.length ? (
         <div className="surface overflow-x-auto">
           <table className="data-table">
             <thead>
@@ -1973,6 +2147,8 @@ function StaffManagementPage({ data }) {
                     className="button-secondary"
                     onClick={async () => {
                       try {
+                        setError('');
+                        setNotice('');
                         await api(
                           `/businesses/${data.businessId}/staff-assignments/${assignment.id}`,
                           {
@@ -1981,6 +2157,9 @@ function StaffManagementPage({ data }) {
                               status: assignment.status === 'active' ? 'inactive' : 'active',
                             }),
                           },
+                        );
+                        setNotice(
+                          `Staff assignment ${assignment.status === 'active' ? 'deactivated' : 'reactivated'}.`,
                         );
                         await data.refresh();
                       } catch (e) {
@@ -2044,11 +2223,16 @@ function ServicesPage({ data }) {
     }
   }
   async function toggle(service, key) {
+    setError('');
+    setNotice('');
     try {
       await api(`/businesses/${data.businessId}/services/${service.id}`, {
         method: 'PATCH',
         body: jsonBody({ [key]: !service[key] }),
       });
+      setNotice(
+        `${service.name}: ${key === 'queueEnabled' ? 'walk-in queue' : 'appointments'} ${service[key] ? 'disabled' : 'enabled'}.`,
+      );
       await data.refresh();
     } catch (e) {
       setError(e.message);
@@ -2149,7 +2333,8 @@ function ServicesPage({ data }) {
                   .filter(
                     (assignment) =>
                       assignment.status === 'active' &&
-                      assignment.serviceIds.some((id) => String(id) === String(service.id)),
+                      (!assignment.serviceIds.length ||
+                        assignment.serviceIds.some((id) => String(id) === String(service.id))),
                   )
                   .map(
                     (assignment) =>
@@ -2265,7 +2450,6 @@ function BranchesPage({ data }) {
               <p className="mt-1 text-sm text-slate-500">
                 {branch.timezone} · {branch.operatingHours.length} opening windows
               </p>
-              <p className="mt-1 text-xs text-slate-400">{branch.id}</p>
             </div>
             <div className="flex gap-2">
               <span className={statusClass(branch.status === 'active' ? 'SERVING' : 'CANCELLED')}>
@@ -2725,7 +2909,8 @@ function StaffOverview({ data }) {
                     'Room'}{' '}
                   · Ticket #{t.sequenceNumber}
                 </span>
-                <span className={statusClass(t.status)}>{t.status}</span>
+                <p className="text-sm text-slate-600">{customerName(t)}</p>
+                <span className={statusClass(t.status)}>{queueStatusLabel(t.status)}</span>
               </div>
             ))
         ) : (
@@ -3342,6 +3527,7 @@ export function QueueEntry() {
       }
     };
     socket.on('ticket.updated', refreshTicket);
+    socket.on('connect', () => refreshTicket({}));
     return () => socket.disconnect();
   }, [ticket?.id, token]);
   async function join(event) {

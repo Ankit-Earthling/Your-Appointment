@@ -1,8 +1,8 @@
 # Your Appointment — Security Design
 
 **Status:** Proposed design for review  
-**Applies to:** MVP described by SRS v0.2  
-**References:** `AGENTS.md`, `docs/SRS.md` v0.2, `docs/architecture.md` v0.1, `docs/database-design.md` v0.1, and `docs/api-specification.md` v0.1
+**Applies to:** MVP described by SRS v0.4
+**References:** `docs/SRS.md` v0.4, `docs/architecture.md` v0.2, `docs/database-design.md` v0.3, and `docs/api-specification.md` v0.3
 
 This document describes security boundaries and controls to guide implementation. It is not a compliance statement, penetration-test result, or guarantee that a system is secure. Controls marked **required** come from the approved project rules or baselines. Controls marked **proposed** need implementation and review. Product policies marked **TBD** must not be inferred from this design.
 
@@ -148,6 +148,10 @@ Mongoose and MongoDB inputs must be structured and validated; do not construct r
 ## 21. Sensitive data and privacy
 
 Collect and expose only data needed for the appointment and queue workflows. Public endpoints and live events must not reveal private customer information. Keep customer identity separate from tenant membership; an account does not imply a membership in every business where the person books. Avoid placing sensitive fields in analytics and operational logs.
+
+Owner/staff account creation, business ownership and membership do not create customer profiles. A tenant `CustomerProfile` is created or populated only after an explicit customer action: an optional booking-form consent or the post-completion queue consent. Contact fields are copied into the profile only when provided in that action; the queue flow never copies email or phone from its operational ticket snapshot. An active queue ticket may show its submitted display name to authorized owner/staff operations, while public ticket APIs and Socket.IO events remain free of names and contact details. Historical customer and visit views display `Anonymous customer` when no consented, eligible profile association exists. Customer APIs filter out profiles whose `consentAt` is absent. Legacy records without reliable consent are anonymized in place, with user/profile identifying fields cleared; appointment, ticket and audit references are preserved.
+
+This implementation record does not settle the exact legal basis, consent wording for each jurisdiction, deletion/export rights, profile retention, or access logging for support. Those governance details remain **TBD** and require product/legal review before launch. A customer consent checkbox is an explicit application action recorded on the backend, but it is not evidence of identity verification or a substitute for jurisdiction-specific legal review.
 
 Data retention, deletion, export, consent, legal jurisdiction, data residency, and exact customer-visible privacy disclosures are **TBD**. Do not make retention or regulatory compliance commitments until they are decided. The security design does not require or assert a particular encryption-at-rest configuration; infrastructure encryption choices remain a deployment decision.
 

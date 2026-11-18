@@ -2,6 +2,24 @@
 
 Your Appointment is a local-first, multi-tenant appointment booking and live queue application. This repository is intended to run on a developer’s Windows machine; deployment and hosting are outside the current scope.
 
+## Product overview
+
+Business owners configure branches, services/rooms and staff, then manage appointments and independent service queues. Staff operate only within their assigned branches and services. Customers can book as guests or registered users, enter a walk-in queue from a branch QR link, and receive live ticket updates. Owners can review tenant-scoped customer profiles and completed visit history when the customer has explicitly consented to save a profile.
+
+### Current capabilities
+
+- Multi-tenant owner and staff accounts with backend membership and assignment checks.
+- Appointment booking with availability checks and atomic staff-specific reservation claims.
+- Independent branch/service queue numbering, multi-staff operations, guest QR entry and Socket.IO updates.
+- Business and staff management, customer records, activity history and branch/date-filtered operational counts.
+- Explicit customer profile consent; booking and ticket snapshots remain operational data and do not automatically create profiles.
+
+Owners and staff are not automatically customer profiles. Queue snapshots can show a submitted name to authorized staff while a ticket is active; public ticket status and socket events do not expose names or contact information. The Customers page contains only profiles with recorded consent and reports only eligible completed visits.
+
+## Architecture
+
+The app is a modular monolith: React + Vite + Tailwind in `frontend/`, and Node.js + Express with MongoDB/Mongoose and Socket.IO in `backend/`. The backend owns identity, tenant authorization, consent, validation, persistence and concurrency control. See [architecture](docs/architecture.md), [database design](docs/database-design.md), [API specification](docs/api-specification.md), [security design](docs/security-design.md), and [MVP decisions](docs/mvp-decisions.md).
+
 ## Prerequisites
 
 - Windows 11 and PowerShell.
@@ -74,6 +92,20 @@ Remove-Item Env:DEMO_OWNER_EMAIL, Env:DEMO_OWNER_PASSWORD, Env:DEMO_STAFF_EMAIL,
 
 The seed prints the owner/staff email addresses, business/branch/service IDs and a one-time local queue QR URL. Use the passwords you entered when signing in; the seed does not print them. Run the seed again only when you want to refresh the demo setup: it rotates and revokes the previous QR credential.
 
+For a database upgraded from an earlier build, inspect legacy customer profiles before using the consent migration. It defaults to a read-only aggregate dry-run:
+
+```powershell
+npm run migrate:customer-consent --workspace backend
+```
+
+Only after reviewing that aggregate summary, apply it explicitly with:
+
+```powershell
+npm run migrate:customer-consent --workspace backend -- --apply
+```
+
+The migration preserves ticket, appointment and audit records. It backfills profile consent only from a recorded appointment/queue consent timestamp, clears contact details collected by the old queue flow, and anonymizes profiles without reliable consent. It never prints profile data. Do not run it against an unintended database; check `MONGODB_URI` in your local environment first.
+
 ### 5. Start the frontend and backend
 
 From the repository root:
@@ -125,6 +157,7 @@ npm test
 npm run lint
 npm run build
 npm run format
+npm run format:check
 npm audit
 ```
 

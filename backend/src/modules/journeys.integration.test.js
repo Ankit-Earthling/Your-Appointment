@@ -14,6 +14,9 @@ import {
   User,
   CustomerProfile,
   Appointment,
+  ReservationCalendar,
+  PublicAccessToken,
+  AuditEvent,
 } from '../models/index.js';
 import { signSession, SESSION_COOKIE } from '../lib/security.js';
 import { setIo } from '../lib/socket.js';
@@ -55,6 +58,9 @@ beforeAll(async () => {
       User,
       CustomerProfile,
       Appointment,
+      ReservationCalendar,
+      PublicAccessToken,
+      AuditEvent,
     ].map((model) => model.init()),
   );
 });
@@ -262,6 +268,8 @@ describe('independent room queue operations', () => {
       tenantId: tenant._id,
       displayName: 'Saved Guest',
       email: 'saved@example.test',
+      consentAt: new Date(Date.now() - 86400000),
+      consentSource: 'queue_completion',
     });
     const completed = await join(serviceA._id, 'Saved Guest');
     const waiting = await join(serviceB._id, 'Saved Guest');
@@ -370,6 +378,8 @@ describe('independent room queue operations', () => {
       userId: registeredCustomer._id,
       displayName: 'Business Preferred Name',
       email: registeredCustomer.email,
+      consentAt: new Date(),
+      consentSource: 'queue_completion',
     });
     const response = await request(app)
       .post(`/api/v1/public/branches/${branch._id}/queue-tickets`)
@@ -460,7 +470,7 @@ describe('independent room queue operations', () => {
       )
       .set(as(owner))
       .expect(200);
-    expect(response.body.data[0].customerDisplayName).toBe('Guest customer');
+    expect(response.body.data[0].customerDisplayName).toBe('Anonymous customer');
     expect(JSON.stringify(response.body)).not.toContain('Private Foreign Customer');
     expect(JSON.stringify(response.body)).not.toContain('Temporary name');
   });
@@ -578,7 +588,15 @@ describe('independent room queue operations', () => {
   });
 
   it('requires completion and explicit consent before creating a guest profile', async () => {
-    const joined = await join(serviceA._id, 'Opt-in guest');
+    const joined = await request(app)
+      .post(`/api/v1/public/branches/${branch._id}/queue-tickets`)
+      .send({
+        serviceId: String(serviceA._id),
+        displayName: 'Opt-in guest',
+        email: 'ticket-only@example.test',
+        phone: '555-0198',
+      })
+      .expect(201);
     const id = joined.body.data.ticket.id;
     await request(app)
       .post(`/api/v1/public/queue-tickets/${id}/profile`)
@@ -605,11 +623,129 @@ describe('independent room queue operations', () => {
     expect(saved.customerProfileId).toBeTruthy();
     expect(saved.profileConsentAt).toBeInstanceOf(Date);
     expect(await CustomerProfile.countDocuments({ tenantId: tenant._id })).toBe(1);
+    const profile = await CustomerProfile.findById(saved.customerProfileId);
+    expect(profile.consentAt).toBeInstanceOf(Date);
+    expect(profile.consentSource).toBe('queue_completion');
+    expect(profile.email).toBe('');
+    expect(profile.phone).toBe('');
     await request(app)
       .post(`/api/v1/public/queue-tickets/${id}/profile`)
       .set('X-Public-Access-Token', joined.body.data.accessToken)
       .send({ consent: true })
       .expect(200);
     expect(await CustomerProfile.countDocuments({ tenantId: tenant._id })).toBe(1);
+  });
+
+  it('does not create customer profiles for business owners or staff memberships', async () => {
+    expect(await CustomerProfile.countDocuments({ tenantId: tenant._id })).toBe(0);
+    expect(await Membership.countDocuments({ tenantId: tenant._id })).toBe(3);
+    expect(
+      await CustomerProfile.countDocuments({
+        userId: { $in: [owner._id, staffOne._id, staffTwo._id] },
+      }),
+    ).toBe(0);
+  });
+
+  it('registration and business creation establish identity and membership without customer profiles', async () => {
+    const email = `new-owner-${crypto.randomUUID()}@example.test`;
+    const registration = await request(app)
+      .post('/api/v1/auth/register')
+      .send({ displayName: 'New Owner', email, password: 'local-test-password-123' })
+      .expect(201);
+    const registeredUser = await User.findById(registration.body.data.user.id);
+    expect(await CustomerProfile.exists({ userId: registeredUser._id })).toBeFalsy();
+    const creation = await request(app)
+      .post('/api/v1/businesses')
+      .set(as(registeredUser))
+      .send({ name: 'New Owner Business', businessType: 'Local service' })
+      .expect(201);
+    const businessId = creation.body.data.business.id;
+    expect(
+      await Membership.exists({ tenantId: businessId, userId: registeredUser._id }),
+    ).toBeTruthy();
+    expect(
+      await CustomerProfile.exists({ tenantId: businessId, userId: registeredUser._id }),
+    ).toBeFalsy();
+  });
+
+  it('keeps appointment details operational without consent and saves only explicit consent', async () => {
+    tenant.features.appointments = true;
+    await tenant.save();
+    serviceA.appointmentEnabled = true;
+    await serviceA.save();
+    const allDay = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+      dayOfWeek,
+      opensLocal: '00:00',
+      closesLocal: '23:59',
+    }));
+    branch.operatingHours = allDay;
+    await branch.save();
+    await StaffAssignment.updateMany({ tenantId: tenant._id }, { $set: { workingHours: allDay } });
+    const startAt = new Date(Date.now() + 2 * 86400000);
+    startAt.setUTCMinutes(0, 0, 0);
+    const book = (offset, consent) =>
+      request(app)
+        .post(`/api/v1/public/branches/${branch._id}/appointments`)
+        .send({
+          serviceId: String(serviceA._id),
+          startAt: new Date(startAt.getTime() + offset * 86400000).toISOString(),
+          displayName: 'Booking Customer',
+          email: `booking-${offset}@example.test`,
+          ...(consent ? { saveProfileConsent: true } : {}),
+        });
+    const operationalOnly = await book(0, false).expect(201);
+    const firstAppointment = await Appointment.findById(operationalOnly.body.data.appointment.id);
+    expect(firstAppointment.customerProfileId).toBeNull();
+    expect(firstAppointment.profileConsentAt).toBeNull();
+    expect(firstAppointment.customerSnapshot.email).toBe('booking-0@example.test');
+    expect(await CustomerProfile.countDocuments({ tenantId: tenant._id })).toBe(0);
+    const consented = await book(1, true).expect(201);
+    const secondAppointment = await Appointment.findById(consented.body.data.appointment.id);
+    expect(secondAppointment.customerProfileId).toBeTruthy();
+    expect(secondAppointment.profileConsentAt).toBeInstanceOf(Date);
+    expect(
+      await CustomerProfile.countDocuments({ tenantId: tenant._id, consentAt: { $ne: null } }),
+    ).toBe(1);
+    const ownerList = await request(app)
+      .get(`/api/v1/businesses/${tenant._id}/appointments`)
+      .set(as(owner))
+      .expect(200);
+    expect(JSON.stringify(ownerList.body)).not.toContain('booking-0@example.test');
+    expect(JSON.stringify(ownerList.body)).not.toContain('booking-1@example.test');
+    expect(ownerList.body.data.every((appointment) => !('customerSnapshot' in appointment))).toBe(
+      true,
+    );
+  });
+
+  it('keeps linked legacy visits anonymous until reliable consent exists', async () => {
+    const profile = await CustomerProfile.create({
+      tenantId: tenant._id,
+      displayName: 'Legacy Private Name',
+      email: 'legacy-private@example.test',
+    });
+    const joined = await join(serviceA._id, 'Legacy ticket name');
+    await QueueTicket.updateOne(
+      { _id: joined.body.data.ticket.id },
+      { $set: { status: 'COMPLETED', customerProfileId: profile._id } },
+    );
+    const list = await request(app)
+      .get(`/api/v1/businesses/${tenant._id}/customers`)
+      .set(as(owner))
+      .expect(200);
+    expect(list.body.data).toHaveLength(0);
+    const detail = await request(app)
+      .get(`/api/v1/businesses/${tenant._id}/customers/${profile._id}`)
+      .set(as(owner))
+      .expect(404);
+    expect(JSON.stringify(detail.body)).not.toContain('legacy-private@example.test');
+    const queue = await request(app)
+      .get(
+        `/api/v1/businesses/${tenant._id}/queue-tickets?branchId=${branch._id}&serviceId=${serviceA._id}`,
+      )
+      .set(as(owner))
+      .expect(200);
+    expect(queue.body.data[0].customerDisplayName).toBe('Anonymous customer');
+    expect(JSON.stringify(queue.body)).not.toContain('Legacy Private Name');
+    expect(JSON.stringify(queue.body)).not.toContain('legacy-private@example.test');
   });
 });

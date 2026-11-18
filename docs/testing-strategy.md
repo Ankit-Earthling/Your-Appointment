@@ -1,16 +1,18 @@
 # Your Appointment — Testing Strategy
 
-**Status:** Proposed strategy for review  
-**Requirements baseline:** SRS v0.2  
-**Design/API baselines:** Architecture v0.1, Database Design v0.1, API Specification v0.1
+**Status:** Testing guidance; updated to reflect the local MVP implementation
+
+**Requirements baseline:** SRS v0.4
+
+**Design/API baselines:** Architecture v0.2, Database Design v0.3, API Specification v0.3
 
 ## 1. Purpose
 
-This document defines how future implementation work should be verified. It is a strategy only: no test framework, package, application code, or CI workflow is installed or created by this document. The strategy prioritizes correctness at security and data-integrity boundaries, especially tenant isolation, authorization, appointment concurrency, queue sequence allocation, and privacy-safe public and live responses.
+This document records verification principles and the current local test approach. The repository contains a React/Vite frontend and Express modular-monolith backend with Vitest, React Testing Library, Supertest, and local MongoDB integration tests. No browser end-to-end runner is currently configured. The strategy prioritizes correctness at security and data-integrity boundaries, especially tenant isolation, authorization, appointment concurrency, queue sequence allocation, and privacy-safe public and live responses.
 
 ## 2. Scope
 
-The strategy covers the React/Vite frontend, Express modular-monolith backend, Mongoose persistence, REST API, Socket.IO events, and the workflows in SRS v0.2. It covers functional, integration, security, concurrency, UI, accessibility, and operational checks. External notification delivery tests are conditional on the provider and channel decisions. Payment, advanced analytics, cross-business intelligence, mobile applications, and other out-of-scope features are not test targets for the MVP.
+The strategy covers the React/Vite frontend, Express modular-monolith backend, Mongoose persistence, REST API, Socket.IO events, and the workflows in SRS v0.4. It covers functional, integration, security, concurrency, UI, accessibility, and operational checks. External notification delivery tests are conditional on the provider and channel decisions. Payment, advanced analytics, cross-business intelligence, mobile applications, and other out-of-scope features are not test targets for the MVP.
 
 ## 3. Testing principles
 
@@ -35,21 +37,21 @@ flowchart TB
 
 Keep most checks fast and isolated at the unit level. Use integration tests where behavior depends on Express middleware, MongoDB indexes/atomicity, or Socket.IO room authorization. Reserve browser tests for a small set of complete critical journeys.
 
-## 5. Proposed tools and responsibilities
+## 5. Current tools and responsibilities
 
-These tools are proposals, not dependencies already selected or installed. Confirm package compatibility and versions during project setup.
+The following tools are present in the current repository; use the package manifests and lockfile as the authoritative versions.
 
-| Tool | Proposed use | Why it fits |
+| Tool | Current use | Why it fits |
 |---|---|---|
 | Vitest | Frontend and backend unit tests | One JavaScript/TypeScript-oriented runner can cover Vite configuration and Node modules |
 | React Testing Library with `user-event` | Component and interaction tests | Asserts what a user can observe and do rather than component internals |
 | Supertest | Express API integration tests | Exercises the HTTP application without requiring a separately deployed server |
-| MongoDB Memory Server or isolated MongoDB container | Persistence and API tests | Provides a disposable database; transaction-dependent tests need a replica-set-capable topology |
-| `socket.io-client` | Socket integration tests | Exercises connection authentication, subscription authorization, and event delivery |
-| Playwright | Browser end-to-end and accessibility smoke checks | Covers real user journeys across the frontend and API |
-| Static analysis/lint/type checks | CI quality checks | Finds common defects before runtime; exact tools depend on the implementation language/configuration |
+| Local MongoDB isolated test database | Persistence and API tests | Integration suite creates a unique test database and drops it after execution |
+| `socket.io-client` | Runtime client updates | Used by the application; dedicated socket end-to-end coverage remains limited |
+| Browser automation | Browser end-to-end and accessibility smoke checks | No browser automation runner is configured; real UI workflows require a separately available browser session |
+| ESLint and Prettier | Linting and formatting | Root scripts run static checks and formatting verification |
 
-No dependency installation is part of this documentation milestone. If TypeScript is selected during implementation, share wire-format types only where useful; do not move authorization or domain rules into frontend-shared code.
+Do not move authorization or domain rules into frontend-shared code. Integration tests require a running local MongoDB instance.
 
 ## 6. Unit tests
 
@@ -66,6 +68,8 @@ Test reusable components and user-visible interaction: form validation feedback,
 Run the Express application against an isolated database. Cover route validation, authentication middleware, centralized error shape, service-layer authorization, Mongoose persistence, indexes, and business-scoped queries. Verify that malformed input and unknown fields cannot change protected fields. Ensure public responses contain only approved fields and that no error reveals stack traces, credentials, or another tenant's resource existence.
 
 Test every endpoint in the API inventory as it is implemented. Endpoint definitions that are conditional on policy approval (for example refresh) remain unimplemented or explicitly pending until the policy is approved; do not treat a placeholder response as satisfying the requirement.
+
+Customer identity and consent regression coverage must prove that owner/staff registration and membership create no `CustomerProfile`; appointments remain operationally bookable without profile consent; queue ticket contact snapshots are not copied to profiles; only explicit consent stores a profile and timestamp; legacy profiles without reliable consent are anonymized and omitted from customer list/detail; public ticket responses and socket events omit names/contact; and only same-tenant consented profiles and eligible completed visits are visible. Verify no automatic association by name or unverified contact. The migration's default mode must be dry-run and its output aggregate-only.
 
 ## 8. MongoDB and Mongoose tests
 

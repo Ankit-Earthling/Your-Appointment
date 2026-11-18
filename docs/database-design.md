@@ -2,13 +2,15 @@
 
 | Document attribute    | Value                                       |
 | --------------------- | ------------------------------------------- |
-| Status                | Initial database design proposal for review |
-| Requirements baseline | SRS version 0.3                             |
-| Architecture baseline | Architecture version 0.1                    |
-| Version               | 0.2                                         |
-| Last updated          | 2026-11-12                                  |
+| Status                | Database design baseline with implementation alignment revision |
+| Requirements baseline | SRS version 0.4                             |
+| Architecture baseline | Architecture version 0.2                    |
+| Version               | 0.3                                         |
+| Last updated          | 2026-11-18                                  |
 
-This document translates the approved requirements and architecture into a proposed MongoDB/Mongoose persistence design. It is an implementation-planning artifact, not application code. Collection and field proposals are not an approval of product policies marked TBD in the baselines. Scheduling capacity, appointment lifecycle, queue transitions, setting granularity, detailed guest verification, token lifecycle, legal retention overrides, and MongoDB topology remain open. Queue allocation scope is tenant/branch/service/local business date under SRS 0.3.
+This document translates the approved requirements and architecture into a MongoDB/Mongoose persistence design and has been reconciled with the current local models. It remains an implementation-planning artifact rather than a promise that every conceptual field is implemented. Collection and field proposals are not an approval of product policies marked TBD in the baselines. Scheduling capacity, appointment lifecycle, queue transitions, setting granularity, detailed guest verification, token lifecycle, legal retention overrides, and MongoDB topology remain open. Queue allocation scope is tenant/branch/service/local business date under SRS 0.4.
+
+**Revision note (0.3):** Aligns customer profile consent provenance, optional appointment profile association, and operational booking snapshots with the current implementation. It retains the unresolved product policies and does not add new data collection requirements.
 
 ## 1. Database Design Overview
 
@@ -29,7 +31,7 @@ Mongoose models and repositories should be called by the owning modular-monolith
 
 ### Design labels used below
 
-- **Baseline constraint:** required by SRS v0.3 or the approved architecture.
+- **Baseline constraint:** required by SRS v0.4 or the approved architecture.
 - **Proposed design:** a technical structure recommended for implementation planning, subject to review.
 - **Conditional:** valid only if the related open policy is approved.
 - **TBD:** must not be finalized without a product or operational decision.
@@ -348,12 +350,15 @@ Schedule values are examples, not an approved recurrence or branch-assignment po
 | `_id`                    | ObjectId |       Yes | Profile identifier.                                                       |
 | `tenantId`               | ObjectId |       Yes | Business whose customer relationship/details this profile represents.     |
 | `userId`                 | ObjectId |  Optional | References a registered global `users` account; no membership is implied. |
-| `contact`                | Object   |       TBD | Minimum needed contact fields; exact data/verification policy TBD.        |
-| `displayName`            | String   |  Optional | Tenant-facing customer name, subject to data minimization.                |
+| `email`, `phone`         | String   |  Optional | Contact details explicitly entered as part of a customer consent action; never copied from an operational snapshot by default. |
+| `displayName`            | String   |       Yes | Tenant-facing name saved only through explicit customer consent.          |
+| `consentAt`              | Date     |  Optional | UTC timestamp proving the profile-save action was recorded; null means unconsented and must not appear in customer views. |
+| `consentSource`          | String   |  Optional | `appointment_booking` or `queue_completion`; provenance for explicit consent. |
+| `emailVerifiedAt`, `phoneVerifiedAt` | Date | Optional | Verification timestamps, if any verification workflow is later implemented. |
 | `status`                 | String   |  Optional | If needed for tenant-specific profile lifecycle; policy TBD.              |
 | `createdAt`, `updatedAt` | Date     |       Yes | UTC instants.                                                             |
 
-Cross-tenant profile linkage must not reveal one business's customer notes to another business. For guests, `userId` may be absent. Whether a profile is created for each booking, deduplicated by verified contact, or omitted in favor of booking snapshots is unresolved; see Section 9.
+Cross-tenant profile linkage must not reveal one business's customer data to another business. For guests, `userId` may be absent. Owner/staff registration, business creation and membership do not create profiles. A profile is created or populated only on explicit booking or completed-queue consent. When consent is absent, operational records retain only their booking/ticket snapshot; contact data is not copied into a customer profile.
 
 **Example:**
 
@@ -362,8 +367,13 @@ Cross-tenant profile linkage must not reveal one business's customer notes to an
   _id: ObjectId("66b700000000000000000001"),
   tenantId: ObjectId("66b200000000000000000001"),
   userId: ObjectId("66b100000000000000000001"),
+  email: "maya@example.test",
+  phone: "",
   displayName: "Maya Rao",
-  contact: { email: "maya@example.test" },
+  consentAt: ISODate("2026-11-11T10:08:00Z"),
+  consentSource: "queue_completion",
+  emailVerifiedAt: null,
+  phoneVerifiedAt: null,
   createdAt: ISODate("2026-11-11T10:08:00Z"),
   updatedAt: ISODate("2026-11-11T10:08:00Z")
 }
@@ -381,9 +391,10 @@ This tenant profile example does not imply that the user is a member of the busi
 | `tenantId`                             | ObjectId        |         Yes | Tenant owner.                                                                                                                                                                |
 | `branchId`                             | ObjectId        |         Yes | Same-tenant branch.                                                                                                                                                          |
 | `serviceId`                            | ObjectId        |         Yes | Same-tenant service eligible at the branch.                                                                                                                                  |
-| `customerProfileId`                    | ObjectId        |    Optional | Same-tenant profile if profile model selected.                                                                                                                               |
+| `customerProfileId`                    | ObjectId        |    Optional | Same-tenant consented profile only; null when customer profile consent has not been recorded.                                                                                |
 | `customerUserId`                       | ObjectId        |    Optional | Global registered customer identity; does not require membership.                                                                                                            |
-| `customerSnapshot`                     | Object          | Conditional | Proposed minimal booking-time contact snapshot alternative for stable historical contact; fields/data policy TBD. Avoid unnecessary duplication.                             |
+| `customerSnapshot`                     | Object          |       Yes | Operational booking snapshot: display name and booking contact needed to handle the appointment. It is not a customer profile and must be removed from owner/staff API projections. |
+| `profileConsentAt`                     | Date            |  Optional | UTC timestamp for the explicit optional profile-save action at booking time.                                                                                                  |
 | `staffAssignmentId`                    | ObjectId        |    Optional | Same-tenant staff assignment if capacity model uses staff-specific assignment.                                                                                               |
 | `capacityClaims`                       | Array of Object | Conditional | Flexible proposed conceptual reservation claims such as `{kind, refId}`. Shape and use depend on approved capacity model; not yet a schema commitment.                       |
 | `startAt`, `endAt`                     | Date            |         Yes | UTC instants; require `startAt < endAt`. Detect actual interval overlap.                                                                                                     |
@@ -404,8 +415,10 @@ This tenant profile example does not imply that the user is a member of the busi
   tenantId: ObjectId("66b200000000000000000001"),
   branchId: ObjectId("66b400000000000000000001"),
   serviceId: ObjectId("66b500000000000000000001"),
-  customerProfileId: ObjectId("66b700000000000000000001"),
+  customerProfileId: null,
   customerUserId: ObjectId("66b100000000000000000001"),
+  customerSnapshot: { displayName: "Maya Rao", email: "maya@example.test", phone: "" },
+  profileConsentAt: null,
   staffAssignmentId: ObjectId("66b600000000000000000001"),
   capacityClaims: [{ kind: "<approved-capacity-kind>", refId: ObjectId("66b600000000000000000001") }],
   startAt: ISODate("2026-11-12T04:30:00Z"),
@@ -783,7 +796,7 @@ The same global user may have customer identity and also hold owner/staff member
 2. **Profile per booking/ticket or embedded contact snapshot:** reduces profile matching needs and can preserve contact information as supplied at that time, but duplicates personal data and complicates correction/deletion.
 3. **No persistent tenant profile for anonymous queue entrants:** store only a minimum ticket snapshot until its retention period; create/associate a business profile only after explicit post-service consent.
 
-For queue entry, the initial SRS decision is the minimum snapshot plus explicit post-service consent. Reuse a profile only when a verified matching contact exists within that tenant; unverified matches must not be merged. The current implementation has no email/phone verification flow, so contact-based deduplication is not available until a verified contact state exists. Appointment profile handling remains as specified separately. No global customer record may silently expose one tenant's data to another.
+For queue entry, the initial SRS decision is the minimum ticket snapshot plus explicit post-service consent. The profile name comes from the ticket, while email/phone are saved only if re-entered in the consent form. The implementation has no email/phone verification flow, so guest contact-based deduplication is disabled. Appointment booking may save/associate a profile only after an explicit booking-form action; otherwise its customer snapshot remains operational and profile ID stays null unless the authenticated user already has a consented same-tenant profile. A registered customer account does not imply membership. Legacy records without reliable consent remain referenced by appointments/tickets but profile personal fields are anonymized and excluded from customer views.
 
 ## 10. Public Access Tokens
 
@@ -945,7 +958,7 @@ This section guides future implementation but deliberately includes no model cod
 
 ## Consistency Check Against Approved Baselines
 
-- SRS version 0.3 remains the requirements baseline; architecture version 0.1 remains the modular-monolith baseline.
+- SRS version 0.4 remains the requirements baseline; architecture version 0.2 remains the modular-monolith baseline.
 - The proposed collection set separates global users from tenant memberships and tenant customer profiles. Registered customers do not need memberships in every business.
 - Every tenant-owned collection includes `tenantId`; tenant references are required to be consistent. The business root uses its own `_id` as `tenantId`.
 - Appointment capacity alternatives and capacity-consuming states remain TBD. Interval overlap includes variable-duration services; ordinary indexes are not claimed to enforce it.

@@ -119,6 +119,12 @@ const customerProfileSchema = new Schema(
     phone: { type: String, trim: true, maxlength: 30, default: '' },
     emailVerifiedAt: { type: Date, default: null },
     phoneVerifiedAt: { type: Date, default: null },
+    consentAt: { type: Date, default: null, index: true },
+    consentSource: {
+      type: String,
+      enum: ['appointment_booking', 'queue_completion'],
+      default: null,
+    },
   },
   baseOptions,
 );
@@ -134,7 +140,13 @@ const appointmentSchema = new Schema(
     serviceId: { type: objectId, ref: 'Service', required: true, index: true },
     staffAssignmentId: { type: objectId, ref: 'StaffAssignment', required: true, index: true },
     customerUserId: { type: objectId, ref: 'User', default: null, index: true },
-    customerProfileId: { type: objectId, ref: 'CustomerProfile', required: true },
+    customerProfileId: { type: objectId, ref: 'CustomerProfile', default: null },
+    customerSnapshot: {
+      displayName: { type: String, trim: true, maxlength: 100, default: 'Anonymous customer' },
+      email: { type: String, lowercase: true, trim: true, maxlength: 254, default: '' },
+      phone: { type: String, trim: true, maxlength: 30, default: '' },
+    },
+    profileConsentAt: { type: Date, default: null },
     startAt: { type: Date, required: true, index: true },
     endAt: { type: Date, required: true },
     timezone: { type: String, required: true },

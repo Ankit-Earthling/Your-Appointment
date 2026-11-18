@@ -1,12 +1,14 @@
 # Your Appointment — Development Roadmap
 
-**Status:** Proposed implementation roadmap for review  
-**Requirements baseline:** SRS v0.2  
-**Design/API baselines:** Architecture v0.1, Database Design v0.1, API Specification v0.1
+**Status:** Implementation roadmap and current-state reference
+
+**Requirements baseline:** SRS v0.4
+
+**Design/API baselines:** Architecture v0.2, Database Design v0.3, API Specification v0.3
 
 ## 1. Purpose and baseline
 
-This roadmap turns the approved requirements and current design documents into a staged implementation plan for a beginner-friendly, portfolio-quality project. It is a plan only: this document does not initialize the repository, create application code, install packages, configure Git, or deploy anything.
+This roadmap records the staged implementation sequence and acceptance goals. The repository has since been initialized and the local application implemented; use the README, package scripts and current source as the status authority. The phase order remains useful for tracing quality expectations and does not mean that the project is still awaiting scaffolding. This project is not deployed or hosted online.
 
 The SRS is the product scope authority. Architecture, database design, and API specification documents guide implementation but preserve unresolved policies. When a conflict or ambiguity is found, pause the affected behavior, update the relevant design baseline through review, then implement it. Do not silently choose a policy because it is easier to code.
 
@@ -23,13 +25,12 @@ The SRS is the product scope authority. Architecture, database design, and API s
 
 ## 3. Proposed repository organization
 
-The following folder layout is a proposal consistent with the project guidance in `AGENTS.md`. It describes future organization and does not indicate that application code or these folders have already been implemented.
+The following folder layout was a proposal consistent with the project guidance. It is now implemented as the repository organization shown below.
 
 ```text
 your-appointment/
-├── AGENTS.md                 # existing project-level development guidance
 ├── .github/
-│   └── workflows/            # future GitHub Actions workflows
+│   └── workflows/            # GitHub Actions CI workflow
 ├── backend/                  # Node.js + Express modular monolith
 │   └── src/
 │       ├── config/           # validated environment configuration
@@ -96,7 +97,7 @@ The phases below are ordered to establish backend security and data integrity be
 
 **Objective:** Establish a clean, reproducible workspace and development conventions.
 
-**Tasks and expected areas:** Adopt the proposed `frontend/`, `backend/`, and `.github/workflows/` folder layout in a way consistent with `AGENTS.md`; initialize Git and GitHub only when beginning this future phase; scaffold React/Vite/Tailwind under `frontend/` and Express under `backend/`; select runtime/package-manager versions, validation library, test/lint/format tooling; create safe environment examples; configure basic GitHub Actions CI workflows; document local setup.
+**Tasks and expected areas:** Completed: repository `frontend/` and `backend/` workspaces, React/Vite/Tailwind and Express/Mongoose foundations, tooling, Git initialization, and local setup documentation. GitHub is configured as the existing remote. Refer to the current README for local commands and known tooling limitations.
 
 **Dependencies:** Approved baseline documents and access to the chosen development environment.
 
@@ -104,7 +105,7 @@ The phases below are ordered to establish backend security and data integrity be
 
 **Required verification:** Clean setup from documented steps; smoke test frontend/API processes; run baseline lint, test, and build commands in CI.
 
-**Done when:** The proposed folder layout, scripts, configuration validation approach, CI, and setup notes are reviewed and reproducible.
+**Status:** Completed. The repository layout, scripts, configuration validation, CI workflow, and setup notes are present and reproducible as documented.
 
 **Risks/TBD:** Compatible versions, package manager and workspace tooling if needed, CI workflow details, and local database strategy.
 

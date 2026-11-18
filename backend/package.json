@@ -7,10 +7,11 @@
     "dev": "node src/server.js",
     "start": "node src/server.js",
     "seed": "node src/seed.js",
+    "migrate:customer-consent": "node src/scripts/migrate-customer-consent.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src --ext .js",
-    "build": "node --check src/app.js && node --check src/server.js && node --check src/seed.js && node --check src/modules/auth.routes.js && node --check src/modules/business.routes.js && node --check src/modules/journeys.routes.js && node --check src/models/index.js && node --check src/config/env.js && node --check src/db/connection.js && node --check src/middleware/error-handler.js"
+    "build": "node --check src/app.js && node --check src/server.js && node --check src/seed.js && node --check src/scripts/migrate-customer-consent.js && node --check src/modules/auth.routes.js && node --check src/modules/business.routes.js && node --check src/modules/journeys.routes.js && node --check src/models/index.js && node --check src/config/env.js && node --check src/db/connection.js && node --check src/middleware/error-handler.js"
   },
   "dependencies": {
     "bcrypt": "6.0.0",

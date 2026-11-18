@@ -301,7 +301,9 @@ export function PublicQueueTicket() {
     [error, setError] = useState(''),
     [profileSaved, setProfileSaved] = useState(false),
     [declined, setDeclined] = useState(false),
-    [consent, setConsent] = useState(false);
+    [consent, setConsent] = useState(false),
+    [profileEmail, setProfileEmail] = useState(''),
+    [profilePhone, setProfilePhone] = useState('');
   const token = decodeURIComponent(window.location.hash.slice(1));
   const refresh = useCallback(async () => {
     try {
@@ -344,7 +346,11 @@ export function PublicQueueTicket() {
       await api(`/public/queue-tickets/${ticketId}/profile`, {
         method: 'POST',
         headers: { 'X-Public-Access-Token': token },
-        body: jsonBody({ consent: true }),
+        body: jsonBody({
+          consent: true,
+          email: profileEmail.trim() || undefined,
+          phone: profilePhone.trim() || undefined,
+        }),
       });
       setProfileSaved(true);
     } catch (e) {
@@ -385,6 +391,21 @@ export function PublicQueueTicket() {
         {ticket?.status === 'COMPLETED' && !profileSaved && !declined && (
           <form className="mt-6 grid gap-3" onSubmit={saveProfile}>
             <p className="font-semibold">Save my details with this business for future visits.</p>
+            <p className="text-sm text-slate-600">
+              Your name from this ticket will be saved. Contact details are optional and are saved
+              only if you enter them here.
+            </p>
+            <Input
+              label="Email address (optional)"
+              type="email"
+              value={profileEmail}
+              onChange={(event) => setProfileEmail(event.target.value)}
+            />
+            <Input
+              label="Phone number (optional)"
+              value={profilePhone}
+              onChange={(event) => setProfilePhone(event.target.value)}
+            />
             <label className="flex items-start gap-2 text-sm">
               <input
                 type="checkbox"
@@ -2045,7 +2066,7 @@ function CustomersPage({ businessId, canEdit = false }) {
     <>
       <PageHeading
         title="Customers"
-        description="Saved business profiles and completed visit history. Guest queue records appear here only after the customer opts in."
+        description="Consent-based business profiles and eligible completed visit history. Booking and queue records stay separate unless the customer opts in."
       />
       <Alert>{error}</Alert>
       <Alert type="success">{notice}</Alert>
@@ -3758,7 +3779,8 @@ export function PublicBooking({ user, sessionLoading }) {
     [loading, setLoading] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
-    [confirmation, setConfirmation] = useState(null);
+    [confirmation, setConfirmation] = useState(null),
+    [saveProfileConsent, setSaveProfileConsent] = useState(false);
   useEffect(() => {
     api(`/public/businesses/${businessId}/branches?flow=appointments`)
       .then((branches) => setBranches(branches))
@@ -3798,6 +3820,7 @@ export function PublicBooking({ user, sessionLoading }) {
           startAt: selected.startAt,
           displayName: user?.displayName ?? form.get('displayName'),
           email: user?.email ?? form.get('email'),
+          saveProfileConsent,
         }),
       });
       sessionStorage.setItem(`appointment:${result.appointment.id}`, result.accessToken);
@@ -3943,6 +3966,18 @@ export function PublicBooking({ user, sessionLoading }) {
                 <Input label="Email address" name="email" type="email" required maxLength={254} />
               </div>
             )}
+            <label className="flex items-start gap-2 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={saveProfileConsent}
+                onChange={(event) => setSaveProfileConsent(event.target.checked)}
+              />
+              <span>
+                I agree to save my name and contact details with this business for future visits. If
+                unchecked, the booking still works and those details are kept only with this
+                appointment.
+              </span>
+            </label>
             {user && (
               <p className="rounded-xl bg-indigo-50 p-4 text-sm text-indigo-900">
                 Booking for {user.displayName} ({user.email})
@@ -3965,6 +4000,8 @@ export function QueueEntry() {
     [displayName, setDisplayName] = useState(''),
     [email, setEmail] = useState(''),
     [phone, setPhone] = useState(''),
+    [profileEmail, setProfileEmail] = useState(''),
+    [profilePhone, setProfilePhone] = useState(''),
     [profileSaved, setProfileSaved] = useState(false),
     [profileDeclined, setProfileDeclined] = useState(false),
     [profileConsent, setProfileConsent] = useState(false),
@@ -4048,9 +4085,8 @@ export function QueueEntry() {
         headers: { 'X-Public-Access-Token': token },
         body: jsonBody({
           consent: true,
-          displayName: displayName || undefined,
-          email: email || undefined,
-          phone: phone || undefined,
+          email: profileEmail.trim() || undefined,
+          phone: profilePhone.trim() || undefined,
         }),
       });
       setProfileSaved(true);
@@ -4109,9 +4145,23 @@ export function QueueEntry() {
                   Save my details with this business for future visits.
                 </p>
                 <p className="mt-1 text-xs text-slate-600">
-                  This is optional. Your queue ticket does not create a customer profile unless you
-                  opt in.
+                  Your ticket name will be saved. Enter contact details here only if you want them
+                  stored in your business customer profile. Your original queue contact is not
+                  copied.
                 </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <Input
+                    label="Email address (optional)"
+                    type="email"
+                    value={profileEmail}
+                    onChange={(event) => setProfileEmail(event.target.value)}
+                  />
+                  <Input
+                    label="Phone number (optional)"
+                    value={profilePhone}
+                    onChange={(event) => setProfilePhone(event.target.value)}
+                  />
+                </div>
                 <label className="mt-3 flex items-start gap-2 text-sm">
                   <input
                     type="checkbox"

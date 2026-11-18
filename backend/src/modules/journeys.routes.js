@@ -40,6 +40,7 @@ const booking = z
     displayName: z.string().trim().min(2).max(100),
     email: z.string().trim().email().max(254),
     phone: z.string().trim().max(30).optional(),
+    saveProfileConsent: z.boolean().optional(),
   })
   .strict();
 const join = z
@@ -55,24 +56,47 @@ const statusBody = z
   .object({ status: z.enum(['CALLED', 'SERVING', 'COMPLETED', 'NO_SHOW', 'CANCELLED']) })
   .strict();
 
-async function customer(tenantId, user, body) {
-  if (user)
-    return CustomerProfile.findOneAndUpdate(
-      { tenantId, userId: user._id },
-      { $set: { displayName: user.displayName, email: user.email } },
-      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true },
-    );
-  return CustomerProfile.create({
+async function saveConsentedProfile({ tenantId, user, displayName, email, phone, source }) {
+  const consentAt = new Date();
+  let profile = user ? await CustomerProfile.findOne({ tenantId, userId: user._id }) : null;
+  if (!profile && !user && email) {
+    profile = await CustomerProfile.findOne({
+      tenantId,
+      consentAt: { $ne: null },
+      email: email.toLowerCase(),
+      emailVerifiedAt: { $ne: null },
+    });
+  }
+  if (profile) {
+    const hadConsent = Boolean(profile.consentAt);
+    profile.displayName = displayName;
+    profile.email = email ?? (hadConsent ? profile.email : '');
+    profile.phone = phone ?? (hadConsent ? profile.phone : '');
+    if (user) profile.userId = user._id;
+    profile.consentAt ??= consentAt;
+    profile.consentSource ??= source;
+    await profile.save();
+    return { profile, created: false };
+  }
+  profile = await CustomerProfile.create({
     tenantId,
-    displayName: body.displayName,
-    email: body.email ?? '',
-    phone: body.phone ?? '',
+    userId: user?._id ?? null,
+    displayName,
+    email: email ?? '',
+    phone: phone ?? '',
+    consentAt,
+    consentSource: source,
   });
+  return { profile, created: true };
 }
 function ticketCustomerName(ticket) {
   const snapshotName = ticket.customerSnapshot?.displayName?.trim();
-  const profileName = ticket.customerProfileId?.displayName?.trim();
-  return snapshotName || profileName || 'Guest customer';
+  const profile = ticket.customerProfileId;
+  const profileName = profile?.consentAt ? profile.displayName?.trim() : '';
+  if (profileName) return profileName;
+  if (['WAITING', 'CALLED', 'SERVING'].includes(ticket.status))
+    return snapshotName || 'Anonymous customer';
+  return 'Anonymous customer';
 }
 
 function emitQueue(tenantId, branchId, payload) {
@@ -230,7 +254,26 @@ router.post(
           },
           { upsert: true },
         );
-        const profile = await customer(business._id, req.user, req.body);
+        let profile = null;
+        let profileConsentAt = null;
+        if (req.body.saveProfileConsent) {
+          const saved = await saveConsentedProfile({
+            tenantId: business._id,
+            user: req.user,
+            displayName: req.body.displayName,
+            email: req.body.email,
+            phone: req.body.phone,
+            source: 'appointment_booking',
+          });
+          profile = saved.profile;
+          profileConsentAt = profile.consentAt;
+        } else if (req.user) {
+          profile = await CustomerProfile.findOne({
+            tenantId: business._id,
+            userId: req.user._id,
+            consentAt: { $ne: null },
+          });
+        }
         const appointment = await Appointment.create({
           _id: appointmentId,
           tenantId: business._id,
@@ -238,7 +281,13 @@ router.post(
           serviceId: service._id,
           staffAssignmentId: staff._id,
           customerUserId: req.user?._id ?? null,
-          customerProfileId: profile._id,
+          customerProfileId: profile?._id ?? null,
+          customerSnapshot: {
+            displayName: req.body.displayName,
+            email: req.body.email,
+            phone: req.body.phone ?? '',
+          },
+          profileConsentAt,
           startAt: start,
           endAt: end,
           timezone: branch.timezone,
@@ -318,12 +367,18 @@ router.get(
       .populate({
         path: 'customerProfileId',
         match: { tenantId: req.tenantId },
-        select: 'displayName',
+        select: 'displayName consentAt',
       });
     const safeAppointments = appointments.map((appointment) => {
       const safeAppointment = appointment.toObject();
-      safeAppointment.customerDisplayName =
-        appointment.customerProfileId?.displayName?.trim() || 'Customer';
+      const consentedName = appointment.customerProfileId?.consentAt
+        ? appointment.customerProfileId.displayName?.trim()
+        : '';
+      const isOperationalBooking = appointment.status === 'BOOKED';
+      safeAppointment.customerDisplayName = isOperationalBooking
+        ? appointment.customerSnapshot?.displayName?.trim() || consentedName || 'Anonymous customer'
+        : consentedName || 'Anonymous customer';
+      delete safeAppointment.customerSnapshot;
       delete safeAppointment.customerProfileId;
       return safeAppointment;
     });
@@ -420,10 +475,12 @@ router.get(
       await Promise.all([
         Appointment.find({ ...activityFilter, status: 'COMPLETED' })
           .sort({ startAt: -1 })
-          .select('customerProfileId branchId startAt status serviceId'),
+          .select('customerProfileId branchId startAt status serviceId profileConsentAt createdAt'),
         QueueTicket.find({ ...activityFilter, status: 'COMPLETED' })
           .sort({ joinedAt: -1 })
-          .select('customerProfileId branchId joinedAt status serviceId'),
+          .select(
+            'customerProfileId branchId joinedAt status serviceId profileConsentAt createdAt',
+          ),
         Appointment.distinct('customerProfileId', activityFilter),
         QueueTicket.distinct('customerProfileId', activityFilter),
       ]);
@@ -442,11 +499,19 @@ router.get(
     const profiles = await CustomerProfile.find({
       tenantId: req.tenantId,
       _id: { $in: profileIds },
-    }).select('displayName email phone createdAt');
+      consentAt: { $ne: null },
+    }).select('displayName email phone createdAt consentAt');
+    const profileById = new Map(profiles.map((profile) => [String(profile._id), profile]));
     const visitHistory = new Map();
     for (const item of [...appointments, ...tickets]) {
       if (!item.customerProfileId) continue;
       const key = String(item.customerProfileId);
+      const profile = profileById.get(key);
+      if (
+        !profile ||
+        (!item.profileConsentAt && new Date(profile.consentAt) > new Date(item.createdAt))
+      )
+        continue;
       const timestamp = item.startAt ?? item.joinedAt;
       const visits = visitHistory.get(key) ?? [];
       visits.push({
@@ -487,6 +552,7 @@ router.get(
     const profile = await CustomerProfile.findOne({
       _id: req.params.customerId,
       tenantId: req.tenantId,
+      consentAt: { $ne: null },
     });
     if (!profile) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Customer was not found.');
     let authorizedBranchIds;
@@ -518,7 +584,7 @@ router.get(
         status: 'COMPLETED',
         ...(authorizedBranchIds ? { branchId: { $in: authorizedBranchIds } } : {}),
       })
-        .select('branchId serviceId startAt status')
+        .select('branchId serviceId startAt status profileConsentAt createdAt')
         .populate('branchId', 'name')
         .populate('serviceId', 'name'),
       QueueTicket.find({
@@ -527,18 +593,20 @@ router.get(
         status: 'COMPLETED',
         ...(authorizedBranchIds ? { branchId: { $in: authorizedBranchIds } } : {}),
       })
-        .select('branchId serviceId joinedAt status')
+        .select('branchId serviceId joinedAt status profileConsentAt createdAt')
         .populate('branchId', 'name')
         .populate('serviceId', 'name'),
     ]);
+    const validVisit = (visit) =>
+      Boolean(visit.profileConsentAt) || new Date(profile.consentAt) <= new Date(visit.createdAt);
     const visits = [
-      ...appointments.map((visit) => ({
+      ...appointments.filter(validVisit).map((visit) => ({
         source: 'appointment',
         at: visit.startAt,
         branch: visit.branchId?.name,
         service: visit.serviceId?.name,
       })),
-      ...tickets.map((visit) => ({
+      ...tickets.filter(validVisit).map((visit) => ({
         source: 'walk-in',
         at: visit.joinedAt,
         branch: visit.branchId?.name,
@@ -574,7 +642,7 @@ router.patch(
   ),
   asyncRoute(async (req, res) => {
     const profile = await CustomerProfile.findOneAndUpdate(
-      { _id: req.params.customerId, tenantId: req.tenantId },
+      { _id: req.params.customerId, tenantId: req.tenantId, consentAt: { $ne: null } },
       { $set: req.body },
       { new: true, runValidators: true },
     );
@@ -670,9 +738,11 @@ router.post(
     });
     if (!config) throw new AppError(409, 'QUEUE_CLOSED', 'This queue is closed.');
     const businessProfile = accountUser
-      ? await CustomerProfile.findOne({ tenantId: business._id, userId: accountUser._id }).select(
-          'displayName',
-        )
+      ? await CustomerProfile.findOne({
+          tenantId: business._id,
+          userId: accountUser._id,
+          consentAt: { $ne: null },
+        }).select('displayName consentAt')
       : null;
     const date = localDate(new Date(), branch.timezone);
     let counter;
@@ -855,44 +925,26 @@ router.post(
         'INVALID_TRANSITION',
         'A profile can be saved after service is complete.',
       );
-    if (ticket.profileCreatedAt && ticket.customerProfileId)
-      return res.status(200).json({ data: { saved: true } });
-    const legacyProfile = ticket.customerProfileId
-      ? await CustomerProfile.findOne({ _id: ticket.customerProfileId, tenantId: ticket.tenantId })
-      : null;
-    const snapshot = ticket.customerSnapshot ?? {
-      displayName: legacyProfile?.displayName ?? 'Customer',
-      email: legacyProfile?.email ?? '',
-      phone: legacyProfile?.phone ?? '',
-    };
-    const email = req.body.email ?? snapshot.email;
-    const phone = req.body.phone ?? snapshot.phone;
-    let profile = null;
-    if (ticket.customerUserId) {
-      profile = await CustomerProfile.findOne({
-        tenantId: ticket.tenantId,
-        userId: ticket.customerUserId,
-      });
-    }
-    if (!profile) {
-      const verifiedContact = [];
-      if (email)
-        verifiedContact.push({ email: email.toLowerCase(), emailVerifiedAt: { $ne: null } });
-      if (phone) verifiedContact.push({ phone, phoneVerifiedAt: { $ne: null } });
-      if (verifiedContact.length)
-        profile = await CustomerProfile.findOne({
+    const savedProfile = ticket.customerProfileId
+      ? await CustomerProfile.findOne({
+          _id: ticket.customerProfileId,
           tenantId: ticket.tenantId,
-          $or: verifiedContact,
-        });
-    }
-    if (!profile) {
-      profile = await CustomerProfile.create({
-        tenantId: ticket.tenantId,
-        displayName: req.body.displayName ?? snapshot.displayName,
-        email,
-        phone,
-      });
-    }
+          consentAt: { $ne: null },
+        })
+      : null;
+    if (ticket.profileCreatedAt && ticket.profileConsentAt && savedProfile)
+      return res.status(200).json({ data: { saved: true } });
+    const snapshot = ticket.customerSnapshot ?? { displayName: 'Anonymous customer' };
+    const user = ticket.customerUserId ? await User.findById(ticket.customerUserId) : null;
+    const saved = await saveConsentedProfile({
+      tenantId: ticket.tenantId,
+      user,
+      displayName: req.body.displayName ?? snapshot.displayName,
+      email: req.body.email,
+      phone: req.body.phone,
+      source: 'queue_completion',
+    });
+    const profile = saved.profile;
     const consentAt = new Date();
     const claimed = await QueueTicket.findOneAndUpdate(
       { _id: ticket._id, tenantId: ticket.tenantId, status: 'COMPLETED', profileCreatedAt: null },
@@ -906,7 +958,7 @@ router.post(
       { returnDocument: 'after' },
     );
     if (!claimed) {
-      if (!ticket.customerUserId && profile._id !== ticket.customerProfileId)
+      if (saved.created)
         await CustomerProfile.deleteOne({ _id: profile._id, tenantId: ticket.tenantId });
       const latest = await QueueTicket.findById(ticket._id).select('profileCreatedAt');
       if (!latest?.profileCreatedAt)
@@ -967,7 +1019,7 @@ router.get(
       .populate({
         path: 'customerProfileId',
         match: { tenantId: req.tenantId },
-        select: 'displayName',
+        select: 'displayName consentAt',
       })
       .populate('serviceId', 'name')
       .populate('branchId', 'name timezone')
@@ -1167,7 +1219,7 @@ router.get(
         .populate({
           path: 'customerProfileId',
           match: { tenantId: req.tenantId },
-          select: 'displayName',
+          select: 'displayName consentAt',
         }),
       StaffAssignment.find({
         tenantId: req.tenantId,
@@ -1272,10 +1324,10 @@ router.get(
       .populate({
         path: 'customerProfileId',
         match: { tenantId: req.tenantId },
-        select: 'displayName',
+        select: 'displayName consentAt',
       })
       .select(
-        'serviceId customerProfileId sequenceNumber customerSnapshot joinedAt serviceStartedAt statusHistory',
+        'serviceId customerProfileId sequenceNumber customerSnapshot joinedAt serviceStartedAt status statusHistory',
       );
     const actorIds = [
       ...new Set(

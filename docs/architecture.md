@@ -2,12 +2,14 @@
 
 | Document attribute    | Value                                    |
 | --------------------- | ---------------------------------------- |
-| Status                | Initial architecture baseline for review |
-| Requirements baseline | SRS version 0.2                          |
-| Version               | 0.1                                      |
-| Last updated          | 2026-11-11                               |
+| Status                | Architecture baseline with implementation alignment revision |
+| Requirements baseline | SRS version 0.4                          |
+| Version               | 0.2                                      |
+| Last updated          | 2026-11-18                               |
 
 This document describes the conceptual software architecture for Your Appointment. It complements, and does not replace, the requirements in [SRS.md](SRS.md). The design intentionally leaves product policies marked TBD in the SRS unresolved. It does not define database schemas, endpoint contracts, or implementation code.
+
+**Revision note (0.2):** Records the current boundary between global accounts, business memberships, operational booking/ticket snapshots, and customer profiles created or populated only through explicit customer consent. Existing appointment-capacity, lifecycle, deployment and privacy-governance decisions remain governed by their respective baselines.
 
 ## 1. Architecture Overview and Goals
 
@@ -25,7 +27,7 @@ Architecture goals:
 6. Use UTC for stored instants and branch IANA timezones for local schedule interpretation.
 7. Make security-sensitive behavior testable and auditable.
 8. Provide understandable boundaries that can evolve without premature distributed-system complexity.
-9. Keep product decisions that remain TBD in SRS version 0.2 open until stakeholders approve them.
+9. Keep product decisions that remain TBD in the current SRS baseline open until stakeholders approve them.
 
 ## 2. Selected Architecture: Modular Monolith
 
@@ -129,7 +131,7 @@ The following are conceptual boundaries within the one backend application. They
 | Staff and schedule                             | Staff memberships/assignments and working schedules/exceptions.                                                                                               | Contributes availability and staff-scoped authorization. Exact schedule granularity remains TBD.                                                                                                                     |
 | Appointment                                    | Availability query, reservation, status changes, cancellation, and rescheduling if included.                                                                  | Coordinates branch, service, schedule, capacity, customer identity, and feature checks. Capacity model and state policy remain TBD.                                                                                  |
 | Queue                                          | Independent service/room entry, atomic daily sequence allocation, ticket status/history, authorized staff operations, owner monitor, and branch activity log. | Counter scope is tenant/branch/service/local business date in branch timezone. Coordinates feature checks, customer snapshot/profile consent, audit, and real-time publication. Queue transition policy remains TBD. |
-| Customer identity/profile                      | Global customer account identity, minimum anonymous ticket snapshots, and optional tenant-scoped profiles.                                                    | A customer account is not a tenant membership. Anonymous queue entry creates no profile; explicit post-service consent is required.                                                                                  |
+| Customer identity/profile                      | Global user identity, operational booking/ticket snapshots, and consented tenant-scoped customer profiles.                                                     | A customer account is not a tenant membership. Owner/staff registration and memberships do not create profiles. Appointment booking may create/associate a profile only after an explicit customer action; queue profile saving requires explicit post-completion consent. Contact data must be separately entered in that consent flow. Legacy records without reliable consent are anonymized while operational references remain. |
 | Analytics                                      | Business-scoped appointment and queue counts and platform-scoped usage analytics.                                                                             | Enforces business scope for owners and platform scope for administrators; does not grant private data access by default.                                                                                             |
 | Audit                                          | Records significant security, membership, configuration, appointment, queue, and platform administration actions.                                             | Receives structured events from modules; sensitive content and retention are restricted.                                                                                                                             |
 | Notification coordination (future/conditional) | May coordinate approved external notification delivery.                                                                                                       | Provider, channels, consent, and MVP inclusion are TBD; WhatsApp is out of scope.                                                                                                                                    |
@@ -233,7 +235,7 @@ Appointment availability is computed by backend application logic. The frontend 
 
 ### Capacity model remains open
 
-SRS v0.3 deliberately retains three conceptual alternatives:
+SRS v0.4 deliberately retains the unresolved conceptual alternatives:
 
 1. **Staff-specific reservations:** a reservation consumes the capacity of an assigned staff member. This makes staff assignment central to conflict checks and may limit flexibility where staff is selected later.
 2. **Service/resource capacity reservations:** a reservation consumes a configured service or resource capacity pool. This may support pooled capacity but requires the business to define those capacities and their scope.
@@ -341,7 +343,7 @@ Conceptual operational practices:
 - Make readiness and health reporting suitable to the selected deployment environment without exposing sensitive system details publicly.
 - Define data retention and deletion handling with privacy/legal requirements before launch.
 
-SRS v0.3 sets no numeric performance, availability, recovery, or event-delivery target. Hosting provider, regions, deployment topology, expected tenant load, concurrent sockets, RTO, and RPO remain TBD.
+SRS v0.4 sets no numeric performance, availability, recovery, or event-delivery target. Hosting provider, regions, deployment topology, expected tenant load, concurrent sockets, RTO, and RPO remain TBD.
 
 ## 16. Development, Testing, and Deployment Environment Architecture
 
@@ -384,7 +386,7 @@ No cloud provider, container strategy, number of backend instances, load balance
 
 ## 18. Unresolved Decisions and Their Architectural Impact
 
-The following decisions remain open in SRS v0.3. They must be resolved by the product owner or stakeholders before affected detailed design is finalized.
+The following decisions remain open in SRS v0.4. They must be resolved by the product owner or stakeholders before affected detailed design is finalized.
 
 | Unresolved decision                                                            | Architectural impact if left open                                                                                                                                                                                    |
 | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

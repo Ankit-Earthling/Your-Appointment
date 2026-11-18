@@ -4,9 +4,12 @@ import { z } from 'zod';
 import {
   Business,
   Branch,
+  Appointment,
   Membership,
   PublicAccessToken,
+  QueueTicket,
   QueueConfiguration,
+  QueueCounter,
   Service,
   StaffAssignment,
   User,
@@ -106,6 +109,7 @@ const branchPatchSchema = z
 const serviceCreateSchema = z
   .object({
     name: z.string().trim().min(2).max(120),
+    description: z.string().trim().max(500).optional(),
     branchIds: z.array(idSchema).min(1),
     appointmentEnabled: z.boolean().default(false),
     queueEnabled: z.boolean().default(false),
@@ -119,6 +123,7 @@ const serviceCreateSchema = z
 const servicePatchSchema = z
   .object({
     name: z.string().trim().min(2).max(120).optional(),
+    description: z.string().trim().max(500).optional(),
     branchIds: z.array(idSchema).min(1).optional(),
     appointmentEnabled: z.boolean().optional(),
     queueEnabled: z.boolean().optional(),
@@ -170,6 +175,7 @@ function serviceDto(service) {
   return {
     id: service._id,
     name: service.name,
+    description: service.description,
     branchIds: service.branchIds,
     appointmentEnabled: service.appointmentEnabled,
     queueEnabled: service.queueEnabled,
@@ -530,6 +536,32 @@ router.patch(
     });
     if (!assignment)
       throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Staff assignment was not found.');
+    if (request.body.status === 'inactive' && assignment.status === 'active') {
+      const membership = await Membership.findOne({
+        _id: assignment.membershipId,
+        tenantId: request.tenantId,
+      }).select('userId');
+      const [activeTicket, upcomingAppointment] = await Promise.all([
+        QueueTicket.exists({
+          tenantId: request.tenantId,
+          branchId: assignment.branchId,
+          status: { $in: ['WAITING', 'CALLED', 'SERVING'] },
+          $or: [{ servingStaffUserId: membership?.userId }, { calledByUserId: membership?.userId }],
+        }),
+        Appointment.exists({
+          tenantId: request.tenantId,
+          staffAssignmentId: assignment._id,
+          status: 'BOOKED',
+          startAt: { $gte: new Date() },
+        }),
+      ]);
+      if (activeTicket || upcomingAppointment)
+        throw new AppError(
+          409,
+          'STAFF_HAS_ACTIVE_WORK',
+          'Reassign or complete active queue work and upcoming appointments before deactivating this staff assignment.',
+        );
+    }
     if (request.body.serviceIds) {
       const count = await Service.countDocuments({
         tenantId: request.tenantId,
@@ -563,6 +595,88 @@ router.patch(
     response.json({
       data: { id: assignment._id, serviceIds: assignment.serviceIds, status: assignment.status },
     });
+  }),
+);
+
+router.delete(
+  '/businesses/:businessId/staff-assignments/:assignmentId',
+  authenticate,
+  validateObjectIds('businessId', 'assignmentId'),
+  resolveMembership,
+  requireRole('owner'),
+  asyncRoute(async (request, response) => {
+    const assignment = await StaffAssignment.findOne({
+      _id: request.params.assignmentId,
+      tenantId: request.tenantId,
+    });
+    if (!assignment)
+      throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Staff assignment was not found.');
+    const membership = await Membership.findOne({
+      _id: assignment.membershipId,
+      tenantId: request.tenantId,
+    });
+    const userId = membership?.userId;
+    const [activeTicket, upcomingAppointment] = await Promise.all([
+      QueueTicket.exists({
+        tenantId: request.tenantId,
+        branchId: assignment.branchId,
+        status: { $in: ['WAITING', 'CALLED', 'SERVING'] },
+        $or: [{ servingStaffUserId: userId }, { calledByUserId: userId }],
+      }),
+      Appointment.exists({
+        tenantId: request.tenantId,
+        staffAssignmentId: assignment._id,
+        status: 'BOOKED',
+        startAt: { $gte: new Date() },
+      }),
+    ]);
+    if (activeTicket || upcomingAppointment)
+      throw new AppError(
+        409,
+        'STAFF_HAS_ACTIVE_WORK',
+        'Complete or reassign active queue work and upcoming appointments before removing this assignment.',
+      );
+    const hasHistory = await Promise.all([
+      Appointment.exists({ tenantId: request.tenantId, staffAssignmentId: assignment._id }),
+      QueueTicket.exists({
+        tenantId: request.tenantId,
+        branchId: assignment.branchId,
+        $or: [
+          { servingStaffUserId: userId },
+          { calledByUserId: userId },
+          { completedByUserId: userId },
+        ],
+      }),
+    ]).then((records) => records.some(Boolean));
+    if (hasHistory) assignment.status = 'inactive';
+    if (hasHistory) await assignment.save();
+    else {
+      await assignment.deleteOne();
+      if (membership) {
+        const remaining = await StaffAssignment.exists({
+          tenantId: request.tenantId,
+          membershipId: membership._id,
+          status: 'active',
+        });
+        if (!remaining) {
+          membership.roles = membership.roles.filter((role) => role !== 'staff');
+          if (membership.roles.length) await membership.save();
+          else await membership.deleteOne();
+        }
+      }
+    }
+    if (userId) ioRef()?.in(`user:${userId}`).disconnectSockets(true);
+    await recordAudit({
+      tenantId: request.tenantId,
+      actorUserId: request.user._id,
+      action: hasHistory ? 'staff.assignment_deactivated' : 'staff.assignment_deleted',
+      resourceType: 'staff_assignment',
+      resourceId: assignment._id,
+      summary: hasHistory
+        ? 'Assignment retained as inactive because it has history.'
+        : 'Unused staff assignment removed.',
+    });
+    response.json({ data: { deleted: !hasHistory, status: hasHistory ? 'inactive' : null } });
   }),
 );
 
@@ -705,6 +819,27 @@ router.patch(
       tenantId: request.tenantId,
     });
     if (!service) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Service was not found.');
+    if (request.body.status === 'inactive' && service.status === 'active') {
+      const [activeTicket, upcomingAppointment] = await Promise.all([
+        QueueTicket.exists({
+          tenantId: request.tenantId,
+          serviceId: service._id,
+          status: { $in: ['WAITING', 'CALLED', 'SERVING'] },
+        }),
+        Appointment.exists({
+          tenantId: request.tenantId,
+          serviceId: service._id,
+          status: 'BOOKED',
+          startAt: { $gte: new Date() },
+        }),
+      ]);
+      if (activeTicket || upcomingAppointment)
+        throw new AppError(
+          409,
+          'SERVICE_HAS_ACTIVE_WORK',
+          'Complete or reassign active queue tickets and upcoming appointments before deactivating this service.',
+        );
+    }
     const branchIds = request.body.branchIds ?? service.branchIds;
     await assertBranchesInTenant(request.tenantId, branchIds);
     if (request.body.appointmentEnabled && !request.business.features.appointments) {
@@ -742,6 +877,73 @@ router.patch(
       summary: 'Service settings updated.',
     });
     response.json({ data: { service: serviceDto(service) } });
+  }),
+);
+
+router.delete(
+  '/businesses/:businessId/services/:serviceId',
+  authenticate,
+  validateObjectIds('businessId', 'serviceId'),
+  resolveMembership,
+  requireRole('owner'),
+  asyncRoute(async (request, response) => {
+    const service = await Service.findOne({
+      _id: request.params.serviceId,
+      tenantId: request.tenantId,
+    });
+    if (!service) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Service was not found.');
+    const [activeTicket, upcomingAppointment] = await Promise.all([
+      QueueTicket.exists({
+        tenantId: request.tenantId,
+        serviceId: service._id,
+        status: { $in: ['WAITING', 'CALLED', 'SERVING'] },
+      }),
+      Appointment.exists({
+        tenantId: request.tenantId,
+        serviceId: service._id,
+        status: 'BOOKED',
+        startAt: { $gte: new Date() },
+      }),
+    ]);
+    if (activeTicket || upcomingAppointment)
+      throw new AppError(
+        409,
+        'SERVICE_HAS_ACTIVE_WORK',
+        'Complete active queue tickets and upcoming appointments before removing this service.',
+      );
+    const hasHistory = await Promise.all([
+      Appointment.exists({ tenantId: request.tenantId, serviceId: service._id }),
+      QueueTicket.exists({ tenantId: request.tenantId, serviceId: service._id }),
+      StaffAssignment.exists({ tenantId: request.tenantId, serviceIds: service._id }),
+    ]).then((records) => records.some(Boolean));
+    if (hasHistory) {
+      service.status = 'inactive';
+      await service.save();
+    } else {
+      const configurationIds = await QueueConfiguration.find({
+        tenantId: request.tenantId,
+        serviceId: service._id,
+      }).distinct('_id');
+      await Promise.all([
+        QueueConfiguration.deleteMany({ tenantId: request.tenantId, serviceId: service._id }),
+        QueueCounter.deleteMany({
+          tenantId: request.tenantId,
+          queueConfigurationId: { $in: configurationIds },
+        }),
+        Service.deleteOne({ _id: service._id, tenantId: request.tenantId }),
+      ]);
+    }
+    await recordAudit({
+      tenantId: request.tenantId,
+      actorUserId: request.user._id,
+      action: hasHistory ? 'service.deactivated' : 'service.deleted',
+      resourceType: 'service',
+      resourceId: service._id,
+      summary: hasHistory
+        ? 'Service retained as inactive because it has history.'
+        : 'Unused service removed.',
+    });
+    response.json({ data: { deleted: !hasHistory, status: hasHistory ? 'inactive' : null } });
   }),
 );
 

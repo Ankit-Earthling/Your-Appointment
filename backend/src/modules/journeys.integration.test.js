@@ -13,6 +13,7 @@ import {
   StaffAssignment,
   User,
   CustomerProfile,
+  Appointment,
 } from '../models/index.js';
 import { signSession, SESSION_COOKIE } from '../lib/security.js';
 import { setIo } from '../lib/socket.js';
@@ -53,6 +54,7 @@ beforeAll(async () => {
       StaffAssignment,
       User,
       CustomerProfile,
+      Appointment,
     ].map((model) => model.init()),
   );
 });
@@ -154,6 +156,184 @@ beforeEach(async () => {
 });
 
 describe('independent room queue operations', () => {
+  it('blocks service removal while queue work is active and retains service history after removal', async () => {
+    const joined = await join(serviceA._id, 'Lifecycle Guest');
+    const servicePath = `/api/v1/businesses/${tenant._id}/services/${serviceA._id}`;
+    await request(app).delete(servicePath).set(as(owner)).expect(409);
+    await request(app)
+      .patch(servicePath)
+      .set(as(staffOne))
+      .send({ status: 'inactive' })
+      .expect(403);
+    await QueueTicket.updateOne(
+      { _id: joined.body.data.ticket.id },
+      { $set: { status: 'COMPLETED' } },
+    );
+    const removed = await request(app).delete(servicePath).set(as(owner)).expect(200);
+    expect(removed.body.data).toMatchObject({ deleted: false, status: 'inactive' });
+    expect((await Service.findById(serviceA._id)).status).toBe('inactive');
+    await request(app)
+      .post(`/api/v1/public/branches/${branch._id}/queue-tickets`)
+      .send({ serviceId: String(serviceA._id), displayName: 'New Guest' })
+      .expect(404);
+  });
+
+  it('hard removes an unused service without operational references', async () => {
+    const unused = await Service.create({
+      tenantId: tenant._id,
+      name: 'Unused service',
+      branchIds: [branch._id],
+      appointmentEnabled: true,
+      queueEnabled: false,
+    });
+    const response = await request(app)
+      .delete(`/api/v1/businesses/${tenant._id}/services/${unused._id}`)
+      .set(as(owner))
+      .expect(200);
+    expect(response.body.data.deleted).toBe(true);
+    expect(await Service.exists({ _id: unused._id, tenantId: tenant._id })).toBeFalsy();
+  });
+
+  it('prevents staff deactivation when their queue work is still active', async () => {
+    const membership = await Membership.findOne({ tenantId: tenant._id, userId: staffOne._id });
+    const assignment = await StaffAssignment.findOne({
+      tenantId: tenant._id,
+      membershipId: membership._id,
+      status: 'active',
+    });
+    const ticket = await join(serviceA._id, 'Assigned Guest');
+    await QueueTicket.updateOne(
+      { _id: ticket.body.data.ticket.id },
+      { $set: { status: 'SERVING', servingStaffUserId: staffOne._id } },
+    );
+    await request(app)
+      .patch(`/api/v1/businesses/${tenant._id}/staff-assignments/${assignment._id}`)
+      .set(as(owner))
+      .send({ status: 'inactive' })
+      .expect(409);
+    expect((await StaffAssignment.findById(assignment._id)).status).toBe('active');
+    await QueueTicket.updateOne(
+      { _id: ticket.body.data.ticket.id },
+      { $set: { status: 'COMPLETED' } },
+    );
+    await request(app)
+      .patch(`/api/v1/businesses/${tenant._id}/staff-assignments/${assignment._id}`)
+      .set(as(owner))
+      .send({ status: 'inactive' })
+      .expect(200);
+    expect(
+      (
+        await request(app)
+          .get(`/api/v1/businesses/${tenant._id}/branches`)
+          .set(as(staffOne))
+          .expect(200)
+      ).body.data,
+    ).toHaveLength(0);
+    expect(
+      (
+        await request(app)
+          .get(`/api/v1/businesses/${tenant._id}/services`)
+          .set(as(staffOne))
+          .expect(200)
+      ).body.data,
+    ).toHaveLength(0);
+  });
+
+  it('applies branch and date filters to appointment and queue analytics separately', async () => {
+    await join(serviceA._id, 'Analytics Guest');
+    const all = await request(app)
+      .get(
+        `/api/v1/businesses/${tenant._id}/analytics?branchId=${branch._id}&from=2020-01-01T00:00:00.000Z&to=2099-01-01T00:00:00.000Z`,
+      )
+      .set(as(owner))
+      .expect(200);
+    expect(all.body.data.queueTickets.WAITING).toBe(1);
+    const future = await request(app)
+      .get(
+        `/api/v1/businesses/${tenant._id}/analytics?branchId=${branch._id}&from=2099-01-01T00:00:00.000Z&to=2099-01-02T00:00:00.000Z`,
+      )
+      .set(as(owner))
+      .expect(200);
+    expect(future.body.data.queueTickets.WAITING ?? 0).toBe(0);
+  });
+
+  it('lists only completed visits for saved same-tenant profiles and supports authorized profile detail updates', async () => {
+    const profile = await CustomerProfile.create({
+      tenantId: tenant._id,
+      displayName: 'Saved Guest',
+      email: 'saved@example.test',
+    });
+    const completed = await join(serviceA._id, 'Saved Guest');
+    const waiting = await join(serviceB._id, 'Saved Guest');
+    const cancelled = await join(serviceA._id, 'Saved Guest');
+    const noShow = await join(serviceB._id, 'Saved Guest');
+    await QueueTicket.updateOne(
+      { _id: completed.body.data.ticket.id },
+      {
+        $set: { customerProfileId: profile._id, profileConsentAt: new Date(), status: 'COMPLETED' },
+      },
+    );
+    await QueueTicket.updateOne(
+      { _id: waiting.body.data.ticket.id },
+      { $set: { customerProfileId: profile._id, profileConsentAt: new Date() } },
+    );
+    await QueueTicket.updateOne(
+      { _id: cancelled.body.data.ticket.id },
+      {
+        $set: { customerProfileId: profile._id, profileConsentAt: new Date(), status: 'CANCELLED' },
+      },
+    );
+    await QueueTicket.updateOne(
+      { _id: noShow.body.data.ticket.id },
+      { $set: { customerProfileId: profile._id, profileConsentAt: new Date(), status: 'NO_SHOW' } },
+    );
+    const assignment = await StaffAssignment.findOne({
+      tenantId: tenant._id,
+      serviceIds: serviceA._id,
+    });
+    await Appointment.create({
+      tenantId: tenant._id,
+      branchId: branch._id,
+      serviceId: serviceA._id,
+      staffAssignmentId: assignment._id,
+      customerProfileId: profile._id,
+      startAt: new Date(Date.now() - 3600000),
+      endAt: new Date(Date.now() - 1800000),
+      timezone: branch.timezone,
+      localDate: new Date().toISOString().slice(0, 10),
+      status: 'COMPLETED',
+    });
+    const list = await request(app)
+      .get(`/api/v1/businesses/${tenant._id}/customers`)
+      .set(as(owner))
+      .expect(200);
+    expect(list.body.data).toHaveLength(1);
+    expect(list.body.data[0].totalVisits).toBe(2);
+    expect(list.body.data[0].createdAt).toBeTruthy();
+    expect(list.body.data[0].recentActivity[0].source).toBe('walk-in');
+    const detail = await request(app)
+      .get(`/api/v1/businesses/${tenant._id}/customers/${profile._id}`)
+      .set(as(owner))
+      .expect(200);
+    expect(detail.body.data.visits).toHaveLength(2);
+    await request(app)
+      .patch(`/api/v1/businesses/${tenant._id}/customers/${profile._id}`)
+      .set(as(owner))
+      .send({ displayName: 'Updated Guest' })
+      .expect(200);
+    expect((await CustomerProfile.findById(profile._id)).displayName).toBe('Updated Guest');
+    const foreign = new mongoose.Types.ObjectId();
+    await request(app)
+      .get(`/api/v1/businesses/${tenant._id}/customers/${foreign}`)
+      .set(as(owner))
+      .expect(404);
+    await request(app)
+      .patch(`/api/v1/businesses/${tenant._id}/customers/${profile._id}`)
+      .set(as(staffOne))
+      .send({ displayName: 'No Permission' })
+      .expect(403);
+  });
+
   it('starts each room at ticket one and keeps guest contact details private', async () => {
     const roomA = await request(app)
       .post(`/api/v1/public/branches/${branch._id}/queue-tickets`)
@@ -206,6 +386,9 @@ describe('independent room queue operations', () => {
       await Membership.exists({ tenantId: tenant._id, userId: registeredCustomer._id }),
     ).toBeFalsy();
     expect(response.body.data.ticket.status).toBe('WAITING');
+    expect(
+      (await QueueTicket.findById(response.body.data.ticket.id)).customerProfileId.toString(),
+    ).toBe(profile._id.toString());
     await QueueTicket.collection.updateOne(
       { _id: new mongoose.Types.ObjectId(response.body.data.ticket.id) },
       { $set: { 'customerSnapshot.displayName': '', customerProfileId: profile._id } },
@@ -421,6 +604,12 @@ describe('independent room queue operations', () => {
     const saved = await QueueTicket.findById(id);
     expect(saved.customerProfileId).toBeTruthy();
     expect(saved.profileConsentAt).toBeInstanceOf(Date);
+    expect(await CustomerProfile.countDocuments({ tenantId: tenant._id })).toBe(1);
+    await request(app)
+      .post(`/api/v1/public/queue-tickets/${id}/profile`)
+      .set('X-Public-Access-Token', joined.body.data.accessToken)
+      .send({ consent: true })
+      .expect(200);
     expect(await CustomerProfile.countDocuments({ tenantId: tenant._id })).toBe(1);
   });
 });

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { z } from 'zod';
 import {
   Appointment,
@@ -415,40 +416,184 @@ router.get(
     }
     const activityFilter = { tenantId: req.tenantId };
     if (branchIds) activityFilter.branchId = { $in: branchIds };
-    const [appointments, tickets] = await Promise.all([
-      Appointment.find(activityFilter)
-        .sort({ startAt: -1 })
-        .limit(500)
-        .select('customerProfileId branchId startAt status serviceId'),
-      QueueTicket.find(activityFilter)
-        .sort({ joinedAt: -1 })
-        .limit(500)
-        .select('customerProfileId branchId joinedAt status serviceId'),
-    ]);
+    const [appointments, tickets, scopedAppointmentProfiles, scopedQueueProfiles] =
+      await Promise.all([
+        Appointment.find({ ...activityFilter, status: 'COMPLETED' })
+          .sort({ startAt: -1 })
+          .select('customerProfileId branchId startAt status serviceId'),
+        QueueTicket.find({ ...activityFilter, status: 'COMPLETED' })
+          .sort({ joinedAt: -1 })
+          .select('customerProfileId branchId joinedAt status serviceId'),
+        Appointment.distinct('customerProfileId', activityFilter),
+        QueueTicket.distinct('customerProfileId', activityFilter),
+      ]);
     const profileIds = [
-      ...new Set([...appointments, ...tickets].map((item) => String(item.customerProfileId))),
+      ...new Set(
+        [
+          ...scopedAppointmentProfiles,
+          ...scopedQueueProfiles,
+          ...appointments.map((item) => item.customerProfileId),
+          ...tickets.map((item) => item.customerProfileId),
+        ]
+          .filter(Boolean)
+          .map(String),
+      ),
     ];
     const profiles = await CustomerProfile.find({
       tenantId: req.tenantId,
       _id: { $in: profileIds },
-    }).select('displayName email phone');
-    const latestActivity = new Map();
+    }).select('displayName email phone createdAt');
+    const visitHistory = new Map();
     for (const item of [...appointments, ...tickets]) {
+      if (!item.customerProfileId) continue;
       const key = String(item.customerProfileId);
       const timestamp = item.startAt ?? item.joinedAt;
-      const current = latestActivity.get(key) ?? { count: 0, lastAt: null };
-      current.count += 1;
-      if (!current.lastAt || timestamp > current.lastAt) current.lastAt = timestamp;
-      latestActivity.set(key, current);
+      const visits = visitHistory.get(key) ?? [];
+      visits.push({
+        source: item.startAt ? 'appointment' : 'walk-in',
+        at: timestamp,
+        branchId: item.branchId,
+        serviceId: item.serviceId,
+      });
+      visitHistory.set(key, visits);
     }
     res.json({
-      data: profiles.map((profile) => ({
+      data: profiles.map((profile) => {
+        const visits = (visitHistory.get(String(profile._id)) ?? []).sort(
+          (a, b) => new Date(b.at) - new Date(a.at),
+        );
+        return {
+          id: profile._id,
+          displayName: profile.displayName,
+          email: profile.email,
+          phone: profile.phone,
+          totalVisits: visits.length,
+          firstVisitAt: visits.at(-1)?.at ?? null,
+          lastVisitAt: visits[0]?.at ?? null,
+          createdAt: profile.createdAt,
+          recentActivity: visits.slice(0, 5),
+        };
+      }),
+    });
+  }),
+);
+router.get(
+  '/businesses/:businessId/customers/:customerId',
+  authenticate,
+  validateObjectIds('businessId', 'customerId'),
+  resolveMembership,
+  requireRole('owner', 'staff'),
+  asyncRoute(async (req, res) => {
+    const profile = await CustomerProfile.findOne({
+      _id: req.params.customerId,
+      tenantId: req.tenantId,
+    });
+    if (!profile) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Customer was not found.');
+    let authorizedBranchIds;
+    if (req.membership.roles.includes('staff') && !req.membership.roles.includes('owner')) {
+      const assignments = await StaffAssignment.find({
+        tenantId: req.tenantId,
+        membershipId: req.membership._id,
+        status: 'active',
+      }).select('branchId');
+      authorizedBranchIds = assignments.map((assignment) => assignment.branchId);
+      const visible = await Promise.all([
+        Appointment.exists({
+          tenantId: req.tenantId,
+          customerProfileId: profile._id,
+          branchId: { $in: authorizedBranchIds },
+        }),
+        QueueTicket.exists({
+          tenantId: req.tenantId,
+          customerProfileId: profile._id,
+          branchId: { $in: authorizedBranchIds },
+        }),
+      ]).then((records) => records.some(Boolean));
+      if (!visible) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Customer was not found.');
+    }
+    const [appointments, tickets] = await Promise.all([
+      Appointment.find({
+        tenantId: req.tenantId,
+        customerProfileId: profile._id,
+        status: 'COMPLETED',
+        ...(authorizedBranchIds ? { branchId: { $in: authorizedBranchIds } } : {}),
+      })
+        .select('branchId serviceId startAt status')
+        .populate('branchId', 'name')
+        .populate('serviceId', 'name'),
+      QueueTicket.find({
+        tenantId: req.tenantId,
+        customerProfileId: profile._id,
+        status: 'COMPLETED',
+        ...(authorizedBranchIds ? { branchId: { $in: authorizedBranchIds } } : {}),
+      })
+        .select('branchId serviceId joinedAt status')
+        .populate('branchId', 'name')
+        .populate('serviceId', 'name'),
+    ]);
+    const visits = [
+      ...appointments.map((visit) => ({
+        source: 'appointment',
+        at: visit.startAt,
+        branch: visit.branchId?.name,
+        service: visit.serviceId?.name,
+      })),
+      ...tickets.map((visit) => ({
+        source: 'walk-in',
+        at: visit.joinedAt,
+        branch: visit.branchId?.name,
+        service: visit.serviceId?.name,
+      })),
+    ].sort((a, b) => new Date(b.at) - new Date(a.at));
+    res.json({
+      data: {
         id: profile._id,
         displayName: profile.displayName,
         email: profile.email,
         phone: profile.phone,
-        ...latestActivity.get(String(profile._id)),
-      })),
+        visits,
+      },
+    });
+  }),
+);
+router.patch(
+  '/businesses/:businessId/customers/:customerId',
+  authenticate,
+  validateObjectIds('businessId', 'customerId'),
+  resolveMembership,
+  requireRole('owner'),
+  validate(
+    z
+      .object({
+        displayName: z.string().trim().min(2).max(100).optional(),
+        email: z.union([z.string().trim().email().max(254), z.literal('')]).optional(),
+        phone: z.string().trim().max(30).optional(),
+      })
+      .strict()
+      .refine((body) => Object.keys(body).length > 0),
+  ),
+  asyncRoute(async (req, res) => {
+    const profile = await CustomerProfile.findOneAndUpdate(
+      { _id: req.params.customerId, tenantId: req.tenantId },
+      { $set: req.body },
+      { new: true, runValidators: true },
+    );
+    if (!profile) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Customer was not found.');
+    await recordAudit({
+      tenantId: req.tenantId,
+      actorUserId: req.user._id,
+      action: 'customer.profile_updated',
+      resourceType: 'customer_profile',
+      resourceId: profile._id,
+      summary: 'Customer profile updated.',
+    });
+    res.json({
+      data: {
+        id: profile._id,
+        displayName: profile.displayName,
+        email: profile.email,
+        phone: profile.phone,
+      },
     });
   }),
 );
@@ -559,7 +704,7 @@ router.post(
       serviceId: service._id,
       queueConfigurationId: config._id,
       customerUserId: accountUser?._id ?? null,
-      customerProfileId: null,
+      customerProfileId: businessProfile?._id ?? null,
       customerSnapshot: {
         displayName:
           businessProfile?.displayName?.trim() || accountUser?.displayName || req.body.displayName,
@@ -1185,13 +1330,31 @@ router.get(
     if (!req.membership.roles.includes('owner'))
       throw new AppError(403, 'FORBIDDEN', 'Business owner access is required.');
     const tenantId = req.tenantId;
+    const match = { tenantId };
+    if (req.query.branchId) {
+      if (!/^[a-f\d]{24}$/i.test(req.query.branchId))
+        throw new AppError(400, 'VALIDATION_ERROR', 'branchId must be a valid ID.');
+      match.branchId = new mongoose.Types.ObjectId(req.query.branchId);
+    }
+    if (req.query.from || req.query.to) {
+      const from = req.query.from ? new Date(req.query.from) : new Date(0);
+      const to = req.query.to ? new Date(req.query.to) : new Date();
+      if (Number.isNaN(from.valueOf()) || Number.isNaN(to.valueOf()) || from > to)
+        throw new AppError(400, 'VALIDATION_ERROR', 'Provide a valid date range.');
+      match.startAt = { $gte: from, $lte: to };
+    }
+    const queueMatch = { ...match };
+    if (queueMatch.startAt) {
+      queueMatch.joinedAt = queueMatch.startAt;
+      delete queueMatch.startAt;
+    }
     const [appointments, queues] = await Promise.all([
       Appointment.aggregate([
-        { $match: { tenantId } },
+        { $match: match },
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
       QueueTicket.aggregate([
-        { $match: { tenantId } },
+        { $match: queueMatch },
         { $group: { _id: '$status', count: { $sum: 1 } } },
       ]),
     ]);

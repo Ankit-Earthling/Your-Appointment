@@ -1150,7 +1150,7 @@ function OwnerPage({ section, data, reloadBusinessMemberships, session }) {
     case 'queue-activity':
       return <QueueActivityPage data={data} />;
     case 'customers':
-      return <CustomersPage businessId={data.businessId} />;
+      return <CustomersPage businessId={data.businessId} canEdit />;
     case 'staff':
       return <StaffManagementPage data={data} />;
     case 'services':
@@ -1955,10 +1955,19 @@ function QueueActivityPage({ data }) {
   );
 }
 
-function CustomersPage({ businessId }) {
+function CustomersPage({ businessId, canEdit = false }) {
   const [customers, setCustomers] = useState([]),
     [loading, setLoading] = useState(true),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [search, setSearch] = useState(''),
+    [filter, setFilter] = useState('all'),
+    [periodDays, setPeriodDays] = useState(30),
+    [sort, setSort] = useState('recent'),
+    [page, setPage] = useState(1),
+    [selected, setSelected] = useState(null),
+    [detail, setDetail] = useState(null),
+    [editing, setEditing] = useState(false),
+    [notice, setNotice] = useState('');
   const loadCustomers = useCallback(() => {
     setLoading(true);
     setError('');
@@ -1970,13 +1979,76 @@ function CustomersPage({ businessId }) {
   useEffect(() => {
     loadCustomers();
   }, [loadCustomers]);
+  const filtered = customers
+    .filter((customer) => {
+      const query = search.trim().toLowerCase();
+      const matchesSearch =
+        !query ||
+        [customer.displayName, customer.email, customer.phone].some((value) =>
+          value?.toLowerCase().includes(query),
+        );
+      const matchesFilter =
+        filter === 'all' ||
+        (filter === 'returning'
+          ? customer.totalVisits > 1
+          : filter === 'visited'
+            ? customer.totalVisits > 0
+            : customer.totalVisits === 0);
+      return matchesSearch && matchesFilter;
+    })
+    .sort((a, b) =>
+      sort === 'name'
+        ? a.displayName.localeCompare(b.displayName)
+        : sort === 'visits'
+          ? b.totalVisits - a.totalVisits
+          : new Date(b.lastVisitAt ?? 0) - new Date(a.lastVisitAt ?? 0),
+    );
+  const pageSize = 10;
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const completedVisits = customers.reduce((sum, customer) => sum + customer.totalVisits, 0);
+  const newCustomers = customers.filter(
+    (customer) => new Date(customer.createdAt) >= new Date(Date.now() - periodDays * 86400000),
+  ).length;
+  async function openCustomer(customer) {
+    setSelected(customer);
+    setEditing(false);
+    setError('');
+    try {
+      setDetail(await api(`/businesses/${businessId}/customers/${customer.id}`));
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
+  async function saveCustomer(event) {
+    event.preventDefault();
+    try {
+      const saved = await api(`/businesses/${businessId}/customers/${selected.id}`, {
+        method: 'PATCH',
+        body: jsonBody({
+          displayName: detail.displayName,
+          email: detail.email,
+          phone: detail.phone,
+        }),
+      });
+      setDetail({ ...detail, ...saved });
+      setCustomers((items) =>
+        items.map((item) => (item.id === saved.id ? { ...item, ...saved } : item)),
+      );
+      setEditing(false);
+      setNotice('Customer profile updated.');
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
   return (
     <>
       <PageHeading
         title="Customers"
-        description="Customer profiles and recent booking activity within your authorized business scope."
+        description="Saved business profiles and completed visit history. Guest queue records appear here only after the customer opts in."
       />
       <Alert>{error}</Alert>
+      <Alert type="success">{notice}</Alert>
       {error && (
         <button className="button-secondary mb-5" onClick={loadCustomers}>
           Retry loading customers
@@ -1985,30 +2057,240 @@ function CustomersPage({ businessId }) {
       {loading ? (
         <LoadingView label="Loading customers" />
       ) : customers.length ? (
-        <div className="surface overflow-x-auto">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Visits</th>
-                <th>Last activity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {customers.map((customer) => (
-                <tr key={customer.id}>
-                  <td className="font-medium">{customer.displayName}</td>
-                  <td>{customer.email || '—'}</td>
-                  <td>{customer.phone || '—'}</td>
-                  <td>{customer.count}</td>
-                  <td>{dateTime(customer.lastAt)}</td>
+        <>
+          <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric label="Saved customers" value={customers.length} detail="Business profiles" />
+            <Metric
+              label="New customers"
+              value={newCustomers}
+              detail={`Created in the last ${periodDays} days`}
+            />
+            <Metric
+              label="Returning customers"
+              value={customers.filter((customer) => customer.totalVisits > 1).length}
+              detail="More than one completed visit"
+            />
+            <Metric
+              label="Completed visits"
+              value={completedVisits}
+              detail="Appointments and opted-in walk-ins"
+            />
+          </div>
+          <section className="surface mb-4 grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,2fr)_1fr_1fr_1fr_auto] xl:items-end">
+            <Input
+              label="Search customers"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Name, email or phone"
+            />
+            <Select
+              label="Visit history"
+              value={filter}
+              onChange={(event) => {
+                setFilter(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">All saved profiles</option>
+              <option value="visited">Has completed visits</option>
+              <option value="returning">Returning customers</option>
+              <option value="new">No completed visits</option>
+            </Select>
+            <Select label="Sort by" value={sort} onChange={(event) => setSort(event.target.value)}>
+              <option value="recent">Last visit</option>
+              <option value="name">Name</option>
+              <option value="visits">Visit count</option>
+            </Select>
+            <Select
+              label="New customer period"
+              value={periodDays}
+              onChange={(event) => setPeriodDays(Number(event.target.value))}
+            >
+              <option value={7}>7 days</option>
+              <option value={30}>30 days</option>
+              <option value={90}>90 days</option>
+            </Select>
+            <p className="pb-2 text-sm text-slate-500">
+              {filtered.length} result{filtered.length === 1 ? '' : 's'}
+            </p>
+          </section>
+          <div className="surface overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Visits</th>
+                  <th>Last visit</th>
+                  <th>Customer since</th>
+                  <th>Recent activity</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {visible.map((customer) => (
+                  <tr key={customer.id}>
+                    <td className="font-medium">{customer.displayName}</td>
+                    <td>{customer.email || '—'}</td>
+                    <td>{customer.phone || '—'}</td>
+                    <td className="text-right tabular-nums">{customer.totalVisits}</td>
+                    <td>{dateTime(customer.lastVisitAt)}</td>
+                    <td>{dateTime(customer.createdAt)}</td>
+                    <td>
+                      {customer.recentActivity?.[0]?.source === 'walk-in'
+                        ? 'Walk-in'
+                        : customer.recentActivity?.[0]?.source === 'appointment'
+                          ? 'Appointment'
+                          : 'No completed visits'}
+                    </td>
+                    <td>
+                      <button className="button-secondary" onClick={() => openCustomer(customer)}>
+                        View details
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+            <span>
+              Page {page} of {pageCount}
+            </span>
+            <div className="flex gap-2">
+              <button
+                className="button-secondary"
+                disabled={page <= 1}
+                onClick={() => setPage((value) => value - 1)}
+              >
+                Previous
+              </button>
+              <button
+                className="button-secondary"
+                disabled={page >= pageCount}
+                onClick={() => setPage((value) => value + 1)}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+          {selected && (
+            <div
+              className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/40 p-0 sm:items-center sm:p-5"
+              role="presentation"
+              onClick={() => {
+                setSelected(null);
+                setDetail(null);
+              }}
+            >
+              <section
+                className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white p-5 shadow-2xl sm:rounded-2xl sm:p-7"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="customer-detail-title"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 id="customer-detail-title" className="text-xl font-semibold">
+                      {detail?.displayName ?? selected.displayName}
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Customer since {dateTime(selected.createdAt)} · First visit{' '}
+                      {dateTime(selected.firstVisitAt)} · Last visit{' '}
+                      {dateTime(selected.lastVisitAt)}
+                    </p>
+                  </div>
+                  <button
+                    className="button-secondary"
+                    onClick={() => {
+                      setSelected(null);
+                      setDetail(null);
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+                {detail &&
+                  (editing ? (
+                    <form className="mt-5 grid gap-4 sm:grid-cols-2" onSubmit={saveCustomer}>
+                      <Input
+                        label="Name"
+                        value={detail.displayName}
+                        onChange={(event) =>
+                          setDetail({ ...detail, displayName: event.target.value })
+                        }
+                        required
+                        minLength={2}
+                      />
+                      <Input
+                        label="Email"
+                        type="email"
+                        value={detail.email ?? ''}
+                        onChange={(event) => setDetail({ ...detail, email: event.target.value })}
+                      />
+                      <Input
+                        label="Phone"
+                        value={detail.phone ?? ''}
+                        onChange={(event) => setDetail({ ...detail, phone: event.target.value })}
+                      />
+                      <div className="flex gap-2 sm:col-span-2">
+                        <PrimaryButton>Save changes</PrimaryButton>
+                        <button
+                          type="button"
+                          className="button-secondary"
+                          onClick={() => setEditing(false)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-4">
+                        <p className="text-sm text-slate-600">
+                          {detail.email || 'No email'} <span className="mx-2">·</span>{' '}
+                          {detail.phone || 'No phone'}
+                        </p>
+                        {canEdit && (
+                          <button className="button-secondary" onClick={() => setEditing(true)}>
+                            Edit profile
+                          </button>
+                        )}
+                      </div>
+                      <h3 className="mt-6 font-semibold">Visit history ({detail.visits.length})</h3>
+                      {detail.visits.length ? (
+                        <ul className="mt-3 divide-y divide-slate-100">
+                          {detail.visits.map((visit, index) => (
+                            <li
+                              className="flex flex-wrap justify-between gap-2 py-3 text-sm"
+                              key={`${visit.source}-${visit.at}-${index}`}
+                            >
+                              <span className="font-medium">
+                                {visit.service ?? 'Service'} · {visit.branch ?? 'Branch'}
+                              </span>
+                              <span className="text-slate-500">
+                                {visit.source === 'walk-in' ? 'Walk-in' : 'Appointment'} ·{' '}
+                                {dateTime(visit.at)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-3 text-sm text-slate-500">
+                          No completed visits recorded yet.
+                        </p>
+                      )}
+                    </>
+                  ))}
+              </section>
+            </div>
+          )}
+        </>
       ) : (
         <EmptyState
           title="No customer history yet"
@@ -2025,7 +2307,8 @@ function StaffManagementPage({ data }) {
     [serviceIds, setServiceIds] = useState([]),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [editingAssignment, setEditingAssignment] = useState(null);
   async function add(event) {
     event.preventDefault();
     setBusy(true);
@@ -2038,7 +2321,9 @@ function StaffManagementPage({ data }) {
       });
       setNotice('Staff assignment saved.');
       setEmail('');
+      setBranchId('');
       setServiceIds([]);
+      setEditingAssignment(null);
       await data.refresh();
     } catch (e) {
       setError(e.message);
@@ -2062,6 +2347,9 @@ function StaffManagementPage({ data }) {
       <Alert>{error}</Alert>
       <Alert type="success">{notice}</Alert>
       <form onSubmit={add} className="surface mb-6 grid gap-4 p-5 md:grid-cols-2">
+        <h2 className="text-lg font-semibold md:col-span-2">
+          {editingAssignment ? 'Edit staff assignment' : 'Add staff to a branch'}
+        </h2>
         <Input
           className="md:col-span-2"
           label="Staff account email"
@@ -2104,7 +2392,11 @@ function StaffManagementPage({ data }) {
         </fieldset>
         <div className="md:col-span-2">
           <PrimaryButton disabled={busy || !branchId || !serviceIds.length}>
-            {busy ? 'Saving…' : 'Add or update staff assignment'}
+            {busy
+              ? 'Saving…'
+              : editingAssignment
+                ? 'Save assignment changes'
+                : 'Add or update staff assignment'}
           </PrimaryButton>
         </div>
       </form>
@@ -2169,6 +2461,40 @@ function StaffManagementPage({ data }) {
                   >
                     {assignment.status === 'active' ? 'Deactivate' : 'Reactivate'}
                   </button>
+                  <button
+                    className="button-secondary ml-2"
+                    onClick={() => {
+                      setEditingAssignment(assignment.id);
+                      setEmail(assignment.user?.email ?? '');
+                      setBranchId(String(assignment.branchId));
+                      setServiceIds(assignment.serviceIds.map(String));
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="button-danger ml-2"
+                    onClick={async () => {
+                      if (
+                        !window.confirm(
+                          `Remove ${assignment.user?.displayName ?? 'this staff assignment'} from this branch? Historical records will be retained.`,
+                        )
+                      )
+                        return;
+                      try {
+                        await api(
+                          `/businesses/${data.businessId}/staff-assignments/${assignment.id}`,
+                          { method: 'DELETE' },
+                        );
+                        setNotice('Staff assignment removed or deactivated to preserve history.');
+                        await data.refresh();
+                      } catch (requestError) {
+                        setError(requestError.message);
+                      }
+                    }}
+                  >
+                    Remove
+                  </button>
                 </td>
                 <td>
                   <span
@@ -2193,6 +2519,7 @@ function StaffManagementPage({ data }) {
 
 function ServicesPage({ data }) {
   const [name, setName] = useState(''),
+    [description, setDescription] = useState(''),
     [branchIds, setBranchIds] = useState([]),
     [duration, setDuration] = useState('30'),
     [appointments, setAppointments] = useState(true),
@@ -2208,6 +2535,7 @@ function ServicesPage({ data }) {
         method: 'POST',
         body: jsonBody({
           name,
+          description,
           branchIds,
           durationMinutes: Number(duration),
           appointmentEnabled: appointments,
@@ -2216,6 +2544,7 @@ function ServicesPage({ data }) {
       });
       setNotice('Service created.');
       setName('');
+      setDescription('');
       setBranchIds([]);
       await data.refresh();
     } catch (e) {
@@ -2253,6 +2582,12 @@ function ServicesPage({ data }) {
           onChange={(e) => setName(e.target.value)}
           required
           minLength={2}
+        />
+        <Input
+          label="Description (optional)"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          maxLength={500}
         />
         <Select
           label="Appointment duration"
@@ -2320,6 +2655,9 @@ function ServicesPage({ data }) {
           >
             <div>
               <h2 className="font-semibold">{service.name}</h2>
+              {service.description && (
+                <p className="mt-1 max-w-2xl text-sm text-slate-600">{service.description}</p>
+              )}
               <p className="mt-1 text-sm text-slate-500">
                 {service.durationMinutes} minutes ·{' '}
                 {service.branchIds
@@ -2344,6 +2682,76 @@ function ServicesPage({ data }) {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <button
+                className="button-secondary"
+                onClick={async () => {
+                  const nextName = window.prompt('Service name', service.name);
+                  if (nextName === null) return;
+                  const nextDescription = window.prompt(
+                    'Service description',
+                    service.description ?? '',
+                  );
+                  if (nextDescription === null) return;
+                  try {
+                    await api(`/businesses/${data.businessId}/services/${service.id}`, {
+                      method: 'PATCH',
+                      body: jsonBody({ name: nextName, description: nextDescription }),
+                    });
+                    setNotice('Service details updated.');
+                    await data.refresh();
+                  } catch (requestError) {
+                    setError(requestError.message);
+                  }
+                }}
+              >
+                Edit details
+              </button>
+              <button
+                className="button-secondary"
+                onClick={async () => {
+                  try {
+                    await api(`/businesses/${data.businessId}/services/${service.id}`, {
+                      method: 'PATCH',
+                      body: jsonBody({
+                        status: service.status === 'active' ? 'inactive' : 'active',
+                      }),
+                    });
+                    setNotice(
+                      `Service ${service.status === 'active' ? 'deactivated' : 'reactivated'}.`,
+                    );
+                    await data.refresh();
+                  } catch (requestError) {
+                    setError(requestError.message);
+                  }
+                }}
+              >
+                {service.status === 'active' ? 'Deactivate' : 'Reactivate'}
+              </button>
+              <button
+                className="button-danger"
+                onClick={async () => {
+                  const confirmed = window.confirm(
+                    `Remove ${service.name}? Historical service records will be retained as an inactive service. Active tickets or upcoming bookings must be completed first.`,
+                  );
+                  if (!confirmed) return;
+                  try {
+                    const result = await api(
+                      `/businesses/${data.businessId}/services/${service.id}`,
+                      { method: 'DELETE' },
+                    );
+                    setNotice(
+                      result.deleted
+                        ? 'Unused service removed.'
+                        : 'Service deactivated to preserve its historical records.',
+                    );
+                    await data.refresh();
+                  } catch (requestError) {
+                    setError(requestError.message);
+                  }
+                }}
+              >
+                Remove
+              </button>
               <button
                 className={service.appointmentEnabled ? 'toggle-on' : 'button-secondary'}
                 onClick={() => toggle(service, 'appointmentEnabled')}
@@ -2465,47 +2873,110 @@ function BranchesPage({ data }) {
 }
 
 function AnalyticsPage({ data }) {
-  const appointments = data.analytics?.appointments ?? {};
-  const tickets = data.analytics?.queueTickets ?? {};
+  const [branchId, setBranchId] = useState(''),
+    [from, setFrom] = useState(''),
+    [to, setTo] = useState(''),
+    [analytics, setAnalytics] = useState(null),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    const query = new URLSearchParams();
+    if (branchId) query.set('branchId', branchId);
+    if (from) query.set('from', new Date(`${from}T00:00:00.000Z`).toISOString());
+    if (to) query.set('to', new Date(`${to}T23:59:59.999Z`).toISOString());
+    api(`/businesses/${data.businessId}/analytics${query.size ? `?${query}` : ''}`)
+      .then((result) => {
+        if (active) setAnalytics(result);
+      })
+      .catch((requestError) => {
+        if (active) setError(requestError.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [data.businessId, branchId, from, to]);
+  const appointments = analytics?.appointments ?? {};
+  const tickets = analytics?.queueTickets ?? {};
   return (
     <>
       <PageHeading
         title="Analytics"
         description="Business-scoped operational counts from recorded appointments and queue tickets."
       />
-      <Alert>{data.error}</Alert>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <Metric
-          label="Booked appointments"
-          value={appointments.BOOKED ?? 0}
-          detail="Current booked status"
+      <Alert>{error || data.error}</Alert>
+      <section className="surface mb-5 grid gap-3 p-4 sm:grid-cols-3">
+        <Select
+          label="Branch"
+          value={branchId}
+          onChange={(event) => setBranchId(event.target.value)}
+        >
+          <option value="">All branches</option>
+          {data.branches.map((branch) => (
+            <option key={branch.id} value={branch.id}>
+              {branch.name}
+            </option>
+          ))}
+        </Select>
+        <Input
+          label="From"
+          type="date"
+          value={from}
+          onChange={(event) => setFrom(event.target.value)}
         />
-        <Metric
-          label="Completed appointments"
-          value={appointments.COMPLETED ?? 0}
-          detail="Recorded completions"
+        <Input
+          label="Through"
+          type="date"
+          value={to}
+          onChange={(event) => setTo(event.target.value)}
         />
-        <Metric
-          label="Appointment no-shows"
-          value={appointments.NO_SHOW ?? 0}
-          detail="Recorded no-shows"
+      </section>
+      {loading ? (
+        <LoadingView label="Loading analytics" />
+      ) : Object.keys(appointments).length || Object.keys(tickets).length ? (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <Metric
+            label="Booked appointments"
+            value={appointments.BOOKED ?? 0}
+            detail="Current booked status"
+          />
+          <Metric
+            label="Completed appointments"
+            value={appointments.COMPLETED ?? 0}
+            detail="Recorded completions"
+          />
+          <Metric
+            label="Appointment no-shows"
+            value={appointments.NO_SHOW ?? 0}
+            detail="Recorded no-shows"
+          />
+          <Metric
+            label="Waiting tickets"
+            value={tickets.WAITING ?? 0}
+            detail="All recorded queue dates"
+          />
+          <Metric
+            label="Serving tickets"
+            value={tickets.SERVING ?? 0}
+            detail="Currently in service"
+          />
+          <Metric
+            label="Completed tickets"
+            value={tickets.COMPLETED ?? 0}
+            detail="Recorded completions"
+          />
+        </div>
+      ) : (
+        <EmptyState
+          title="No records for this period"
+          description="Try another date range or branch. Analytics reflect recorded appointments and queue tickets only."
         />
-        <Metric
-          label="Waiting tickets"
-          value={tickets.WAITING ?? 0}
-          detail="All recorded queue dates"
-        />
-        <Metric
-          label="Serving tickets"
-          value={tickets.SERVING ?? 0}
-          detail="Currently in service"
-        />
-        <Metric
-          label="Completed tickets"
-          value={tickets.COMPLETED ?? 0}
-          detail="Recorded completions"
-        />
-      </div>
+      )}
       <p className="mt-4 text-xs text-slate-500">
         Counts reflect business records and do not include forecasting or cross-business
         comparisons.

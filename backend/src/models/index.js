@@ -86,6 +86,7 @@ const serviceSchema = new Schema(
   {
     tenantId: { type: objectId, required: true, index: true },
     name: { type: String, required: true, trim: true, maxlength: 120 },
+    description: { type: String, trim: true, maxlength: 500, default: '' },
     branchIds: { type: [objectId], ref: 'Branch', required: true },
     appointmentEnabled: { type: Boolean, default: false },
     queueEnabled: { type: Boolean, default: false },
